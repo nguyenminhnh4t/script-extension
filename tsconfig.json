@@ -7,8 +7,9 @@
     "strict": true,
     "lib": ["ES2020", "DOM"],
     "types": ["chrome"],
-    "outDir": "dist",
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true
   },
-  "include": ["src", "vite.config.ts", "tailwind.config.ts"]
+  "include": ["src", "vite.config.ts"]
 }
