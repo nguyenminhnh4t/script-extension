@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Simple Automation Runner",
+  "version": "1.0.0",
+  "description": "Config-driven browser task runner",
+  "permissions": ["storage", "tabs", "scripting", "activeTab"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_width": 420,
+    "default_height": 600
+  },
+  "content_scripts": [],
+  "web_accessible_resources": [
+    {
+      "resources": ["content.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
