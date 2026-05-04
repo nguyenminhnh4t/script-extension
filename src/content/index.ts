@@ -53,6 +53,18 @@ async function executeStep(step: Step): Promise<void> {
       await waitForElement(step.selector, step.timeout);
       break;
     }
+    case 'press': {
+      const target = step.selector
+        ? document.querySelector<HTMLElement>(step.selector)
+        : (document.activeElement as HTMLElement | null);
+      if (!target) throw new Error(`Element not found: ${step.selector}`);
+      target.focus();
+      const init: KeyboardEventInit = { key: step.key, bubbles: true, cancelable: true };
+      target.dispatchEvent(new KeyboardEvent('keydown', init));
+      target.dispatchEvent(new KeyboardEvent('keypress', init));
+      target.dispatchEvent(new KeyboardEvent('keyup', init));
+      break;
+    }
     default:
       throw new Error(`Unknown step type: ${(step as Step).type}`);
   }
@@ -158,6 +170,45 @@ function startPickMode(): void {
   document.body.appendChild(overlay);
 }
 
+// --- Record key mode ---
+
+let recordKeyCleanup: (() => void) | null = null;
+
+function startRecordKeyMode(): void {
+  if (recordKeyCleanup) return;
+
+  const banner = document.createElement('div');
+  banner.style.cssText = [
+    'position:fixed', 'top:0', 'left:0', 'right:0', 'z-index:2147483647',
+    'background:#1e3a5f', 'color:#93c5fd', 'font:13px/1 monospace',
+    'text-align:center', 'padding:8px', 'letter-spacing:.05em',
+    'border-bottom:1px solid #3b82f6',
+  ].join(';');
+  banner.textContent = 'Press any key to record  ·  Esc to cancel';
+
+  function onKeyDown(e: KeyboardEvent): void {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    const key = e.key;
+    cleanup();
+    if (key === 'Escape') {
+      chrome.runtime.sendMessage({ type: 'RECORD_KEY_CANCELLED' }).catch(() => {});
+    } else {
+      chrome.runtime.sendMessage({ type: 'RECORD_KEY_COMPLETE', key }).catch(() => {});
+    }
+  }
+
+  function cleanup(): void {
+    document.removeEventListener('keydown', onKeyDown, { capture: true });
+    banner.remove();
+    recordKeyCleanup = null;
+  }
+
+  recordKeyCleanup = cleanup;
+  document.addEventListener('keydown', onKeyDown, { capture: true });
+  document.body.appendChild(banner);
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'RUN_STEP') {
     executeStep(message.step as Step)
@@ -167,6 +218,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message.type === 'START_PICK_MODE') {
     startPickMode();
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (message.type === 'START_RECORD_KEY') {
+    startRecordKeyMode();
     sendResponse({ ok: true });
     return true;
   }

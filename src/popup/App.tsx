@@ -10,7 +10,9 @@ export default function App() {
   const [view, setView] = useState<View | null>(null);
   // stepIndex → selector, fed into ScenarioEditor via pickedSelector prop
   const [pickedSelector, setPickedSelector] = useState<{ stepIndex: number; selector: string } | null>(null);
+  const [recordedKey, setRecordedKey] = useState<{ stepIndex: number; key: string } | null>(null);
   const pickingStepRef = useRef<number | null>(null);
+  const recordingStepRef = useRef<number | null>(null);
 
   useEffect(() => {
     // Restore draft or pick result on popup open
@@ -36,6 +38,10 @@ export default function App() {
         setPickedSelector({ stepIndex: pickingStepRef.current, selector: msg['selector'] });
         pickingStepRef.current = null;
       }
+      if (msg['type'] === 'RECORD_KEY_COMPLETE' && typeof msg['key'] === 'string' && recordingStepRef.current != null) {
+        setRecordedKey({ stepIndex: recordingStepRef.current, key: msg['key'] });
+        recordingStepRef.current = null;
+      }
     };
     chrome.runtime.onMessage.addListener(handler);
     return () => chrome.runtime.onMessage.removeListener(handler);
@@ -43,10 +49,14 @@ export default function App() {
 
   async function handleStartPick(stepIndex: number) {
     pickingStepRef.current = stepIndex;
-    // Save which step is waiting for a pick so background can write selector when popup closes
     const { savePickTarget } = await import('../storage');
     await savePickTarget({ stepIndex, selector: '' });
     chrome.runtime.sendMessage({ type: 'START_PICK_MODE' }).catch(() => {});
+  }
+
+  function handleStartRecordKey(stepIndex: number) {
+    recordingStepRef.current = stepIndex;
+    chrome.runtime.sendMessage({ type: 'START_RECORD_KEY' }).catch(() => {});
   }
 
   if (!view) return null;
@@ -58,6 +68,9 @@ export default function App() {
         pickedSelector={pickedSelector}
         onPickedSelectorConsumed={() => setPickedSelector(null)}
         onStartPick={handleStartPick}
+        recordedKey={recordedKey}
+        onRecordedKeyConsumed={() => setRecordedKey(null)}
+        onStartRecordKey={handleStartRecordKey}
         onSave={() => setView({ name: 'list' })}
         onCancel={() => setView({ name: 'list' })}
       />

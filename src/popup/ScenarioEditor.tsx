@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Scenario, Step, StepType } from '../types';
 import { saveScenario, saveDraft, clearDraft } from '../storage';
 
-const STEP_TYPES: StepType[] = ['open_url', 'fill', 'click', 'select', 'wait', 'wait_for_element'];
+const STEP_TYPES: StepType[] = ['open_url', 'fill', 'click', 'select', 'wait', 'wait_for_element', 'press'];
 
 function emptyStep(): Step {
   return { type: 'fill', selector: '', value: '' };
@@ -17,6 +17,9 @@ interface Props {
   pickedSelector?: { stepIndex: number; selector: string } | null;
   onPickedSelectorConsumed?: () => void;
   onStartPick?: (stepIndex: number) => void;
+  recordedKey?: { stepIndex: number; key: string } | null;
+  onRecordedKeyConsumed?: () => void;
+  onStartRecordKey?: (stepIndex: number) => void;
   onSave: () => void;
   onCancel: () => void;
 }
@@ -72,6 +75,16 @@ const IconWarning = () => (
     <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
   </svg>
 );
+const IconKeyboard = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="2" y="6" width="20" height="12" rx="2" />
+    <line x1="6" y1="10" x2="6" y2="10" strokeWidth="3" strokeLinecap="round" />
+    <line x1="10" y1="10" x2="10" y2="10" strokeWidth="3" strokeLinecap="round" />
+    <line x1="14" y1="10" x2="14" y2="10" strokeWidth="3" strokeLinecap="round" />
+    <line x1="18" y1="10" x2="18" y2="10" strokeWidth="3" strokeLinecap="round" />
+    <line x1="8" y1="14" x2="16" y2="14" strokeWidth="2" strokeLinecap="round" />
+  </svg>
+);
 
 // Step type icon labels
 const STEP_ICONS: Record<StepType, string> = {
@@ -81,10 +94,11 @@ const STEP_ICONS: Record<StepType, string> = {
   select: '☰',
   wait: '⏱',
   wait_for_element: '⏳',
+  press: '⌨',
 };
 
 // ── Component ──────────────────────────────────────────────────────────────
-export default function ScenarioEditor({ initial, pickedSelector, onPickedSelectorConsumed, onStartPick, onSave, onCancel }: Props) {
+export default function ScenarioEditor({ initial, pickedSelector, onPickedSelectorConsumed, onStartPick, recordedKey, onRecordedKeyConsumed, onStartRecordKey, onSave, onCancel }: Props) {
   const [scenario, setScenario] = useState<Scenario>(initial ?? newScenario());
   const [error, setError] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -94,6 +108,12 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
     updateStep(pickedSelector.stepIndex, { selector: pickedSelector.selector } as Partial<Step>);
     onPickedSelectorConsumed?.();
   }, [pickedSelector]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!recordedKey) return;
+    updateStep(recordedKey.stepIndex, { key: recordedKey.key } as Partial<Step>);
+    onRecordedKeyConsumed?.();
+  }, [recordedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -123,6 +143,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
       select: { type: 'select', selector: '', value: '' },
       wait: { type: 'wait', duration: 1000 },
       wait_for_element: { type: 'wait_for_element', selector: '', timeout: 10000 },
+      press: { type: 'press', selector: '', key: '' },
     };
     setScenario((prev) => {
       const steps = [...prev.steps];
@@ -234,6 +255,28 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
               value={step.timeout}
               onChange={(e) => updateStep(index, { timeout: Number(e.target.value) })}
             />
+          </>
+        );
+      case 'press':
+        return (
+          <>
+            {selectorRow(step.selector, (v) => updateStep(index, { selector: v }), index)}
+            <div className="flex gap-1.5">
+              <input
+                className={inputCls}
+                placeholder='Key, e.g. Enter, Tab, Escape, a'
+                value={step.key}
+                onChange={(e) => updateStep(index, { key: e.target.value })}
+              />
+              <button
+                type="button"
+                title="Record key from page"
+                onClick={() => onStartRecordKey?.(index)}
+                className={`${iconBtn} shrink-0 text-gray-400 hover:text-purple-300 hover:bg-purple-950 border border-gray-700/80 hover:border-purple-700/60`}
+              >
+                <IconKeyboard />
+              </button>
+            </div>
           </>
         );
     }

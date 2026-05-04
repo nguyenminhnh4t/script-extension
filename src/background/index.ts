@@ -58,4 +58,24 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     chrome.runtime.sendMessage(message).catch(() => {});
     return false;
   }
+
+  if (message.type === 'START_RECORD_KEY') {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const tabId = tabs[0]?.id;
+      if (!tabId) { sendResponse({ ok: false }); return; }
+      try {
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+        await chrome.tabs.sendMessage(tabId, { type: 'START_RECORD_KEY' });
+        sendResponse({ ok: true });
+      } catch {
+        sendResponse({ ok: false });
+      }
+    });
+    return true;
+  }
+
+  if (message.type === 'RECORD_KEY_COMPLETE' || message.type === 'RECORD_KEY_CANCELLED') {
+    chrome.runtime.sendMessage(message).catch(() => {});
+    return false;
+  }
 });
