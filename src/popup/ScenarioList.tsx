@@ -211,11 +211,11 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
         </div>
       </div>
 
-      {/* List */}
-      <div className="flex-1 overflow-y-auto">
+      {/* Cards */}
+      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
         {scenarios.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 mt-16 text-gray-600">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
               <rect x="3" y="3" width="18" height="18" rx="2" />
               <line x1="8" y1="12" x2="16" y2="12" />
               <line x1="12" y1="8" x2="12" y2="16" />
@@ -228,81 +228,88 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
           const status = runStatuses[s.id] ?? { state: 'idle' };
           const isRunning = status.state === 'running';
 
-          return (
-            <div key={s.id} className="group px-4 py-2.5 border-b border-gray-800/60 hover:bg-gray-900/40 transition-colors">
-              <div className="flex items-center gap-2">
+          const statusBar = (
+            status.state === 'running' ? (
+              <div className="flex items-center gap-1.5 text-xs text-blue-400 mt-1.5 pl-0.5">
+                <IconSpinner />
+                <span>Step {(status.currentStep ?? 0) + 1} of {s.steps.length}</span>
+              </div>
+            ) : status.state === 'success' ? (
+              <div className="flex items-center gap-1.5 text-xs text-emerald-400 mt-1.5 pl-0.5">
+                <IconCheck />
+                <span>Completed</span>
+                <button
+                  onClick={() => handleShowLog(s)}
+                  className="ml-1 text-gray-500 hover:text-gray-300 underline underline-offset-2"
+                >
+                  log
+                </button>
+              </div>
+            ) : status.state === 'error' ? (
+              <div className="flex items-center gap-1.5 text-xs text-red-400 mt-1.5 pl-0.5">
+                <IconAlert />
+                <span className="truncate">{status.error}</span>
+                <button
+                  onClick={() => handleShowLog(s)}
+                  className="ml-1 shrink-0 text-gray-500 hover:text-gray-300 underline underline-offset-2"
+                >
+                  log
+                </button>
+              </div>
+            ) : null
+          );
 
-                {/* Info */}
+          return (
+            <div
+              key={s.id}
+              className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2.5 transition-colors hover:border-gray-700"
+            >
+              {/* Top row */}
+              <div className="flex items-start gap-2">
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-100 truncate">{s.name}</p>
+                  <p className="text-sm font-medium text-gray-100 leading-snug truncate">{s.name}</p>
                   {s.startUrl && (
-                    <p className="text-xs text-gray-500 truncate">{s.startUrl}</p>
+                    <p className="text-xs text-gray-500 truncate mt-0.5">{s.startUrl}</p>
                   )}
-                  {/* Status badge */}
-                  {status.state === 'running' && (
-                    <p className="flex items-center gap-1 text-xs text-blue-400 mt-0.5">
-                      <IconSpinner />
-                      Step {(status.currentStep ?? 0) + 1} / {s.steps.length}
-                    </p>
-                  )}
-                  {status.state === 'success' && (
-                    <p className="flex items-center gap-1 text-xs text-emerald-400 mt-0.5">
-                      <IconCheck /> Done
-                    </p>
-                  )}
-                  {status.state === 'error' && (
-                    <p className="flex items-center gap-1 text-xs text-red-400 mt-0.5">
-                      <IconAlert /> {status.error}
-                    </p>
-                  )}
+                  {/* Step count pill */}
+                  <p className="text-xs text-gray-600 mt-1">
+                    {s.steps.length} step{s.steps.length !== 1 ? 's' : ''}
+                  </p>
                 </div>
 
-                {/* Actions */}
-                <div className="flex items-center gap-0.5 shrink-0">
-                  {/* Log link */}
-                  {(status.state === 'success' || status.state === 'error') && (
-                    <button
-                      title="View run log"
-                      onClick={() => handleShowLog(s)}
-                      className={`${iconBtn} text-gray-500 hover:text-gray-200 hover:bg-gray-800`}
-                    >
-                      <IconLog />
-                    </button>
-                  )}
-
-                  {/* Run */}
+                {/* Action buttons */}
+                <div className="flex items-center gap-0.5 shrink-0 mt-0.5">
                   <button
-                    title="Run scenario"
+                    title="Run"
                     onClick={() => handleRun(s)}
                     disabled={isRunning}
                     className={`${iconBtn} ${
                       isRunning
                         ? 'text-blue-400 cursor-not-allowed'
-                        : 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950'
+                        : 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/60'
                     }`}
                   >
                     {isRunning ? <IconSpinner /> : <IconPlay />}
                   </button>
-
-                  {/* Edit */}
                   <button
-                    title="Edit scenario"
+                    title="Edit"
                     onClick={() => onEdit(s)}
-                    className={`${iconBtn} text-gray-400 hover:text-gray-100 hover:bg-gray-800`}
+                    className={`${iconBtn} text-gray-500 hover:text-gray-200 hover:bg-gray-800`}
                   >
                     <IconPencil />
                   </button>
-
-                  {/* Delete */}
                   <button
-                    title="Delete scenario"
+                    title="Delete"
                     onClick={() => handleDelete(s.id)}
-                    className={`${iconBtn} text-gray-500 hover:text-red-400 hover:bg-red-950/50`}
+                    className={`${iconBtn} text-gray-600 hover:text-red-400 hover:bg-red-950/40`}
                   >
                     <IconTrash />
                   </button>
                 </div>
               </div>
+
+              {/* Status row */}
+              {statusBar}
             </div>
           );
         })}

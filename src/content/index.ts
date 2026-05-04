@@ -54,11 +54,7 @@ async function executeStep(step: Step): Promise<void> {
       break;
     }
     case 'press': {
-      const target = step.selector
-        ? document.querySelector<HTMLElement>(step.selector)
-        : (document.activeElement as HTMLElement | null);
-      if (!target) throw new Error(`Element not found: ${step.selector}`);
-      target.focus();
+      const target = (document.activeElement as HTMLElement | null) ?? document.body;
       const init: KeyboardEventInit = { key: step.key, bubbles: true, cancelable: true };
       target.dispatchEvent(new KeyboardEvent('keydown', init));
       target.dispatchEvent(new KeyboardEvent('keypress', init));

@@ -143,7 +143,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
       select: { type: 'select', selector: '', value: '' },
       wait: { type: 'wait', duration: 1000 },
       wait_for_element: { type: 'wait_for_element', selector: '', timeout: 10000 },
-      press: { type: 'press', selector: '', key: '' },
+      press: { type: 'press', key: '' },
     };
     setScenario((prev) => {
       const steps = [...prev.steps];
@@ -259,25 +259,22 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
         );
       case 'press':
         return (
-          <>
-            {selectorRow(step.selector, (v) => updateStep(index, { selector: v }), index)}
-            <div className="flex gap-1.5">
-              <input
-                className={inputCls}
-                placeholder='Key, e.g. Enter, Tab, Escape, a'
-                value={step.key}
-                onChange={(e) => updateStep(index, { key: e.target.value })}
-              />
-              <button
-                type="button"
-                title="Record key from page"
-                onClick={() => onStartRecordKey?.(index)}
-                className={`${iconBtn} shrink-0 text-gray-400 hover:text-purple-300 hover:bg-purple-950 border border-gray-700/80 hover:border-purple-700/60`}
-              >
-                <IconKeyboard />
-              </button>
-            </div>
-          </>
+          <div className="flex gap-1.5">
+            <input
+              className={inputCls}
+              placeholder='Key — e.g. Enter, Tab, Escape, a'
+              value={step.key}
+              onChange={(e) => updateStep(index, { key: e.target.value })}
+            />
+            <button
+              type="button"
+              title="Record key from page"
+              onClick={() => onStartRecordKey?.(index)}
+              className={`${iconBtn} shrink-0 text-gray-400 hover:text-purple-300 hover:bg-purple-950 border border-gray-700/80 hover:border-purple-700/60`}
+            >
+              <IconKeyboard />
+            </button>
+          </div>
         );
     }
   }

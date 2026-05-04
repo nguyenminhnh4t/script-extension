@@ -42,8 +42,6 @@ export interface WaitForElementStep {
 
 export interface PressStep {
   type: 'press';
-  /** CSS selector of element to focus before dispatching key. Empty = document.activeElement */
-  selector: string;
   /** Key value, e.g. "Enter", "Tab", "Escape", "a" */
   key: string;
 }
