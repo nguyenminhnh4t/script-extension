@@ -2,6 +2,26 @@ import type { Scenario, RunLog } from './types';
 
 const SCENARIOS_KEY = 'scenarios';
 const LOGS_KEY = 'runLogs';
+const DRAFT_KEY = 'editorDraft';
+
+export interface EditorDraft {
+  scenario: Scenario;
+  /** id of the scenario being edited, undefined for new */
+  editingId?: string;
+}
+
+export async function getDraft(): Promise<EditorDraft | undefined> {
+  const result = await chrome.storage.local.get(DRAFT_KEY);
+  return result[DRAFT_KEY] as EditorDraft | undefined;
+}
+
+export async function saveDraft(draft: EditorDraft): Promise<void> {
+  await chrome.storage.local.set({ [DRAFT_KEY]: draft });
+}
+
+export async function clearDraft(): Promise<void> {
+  await chrome.storage.local.remove(DRAFT_KEY);
+}
 
 export async function getScenarios(): Promise<Scenario[]> {
   const result = await chrome.storage.local.get(SCENARIOS_KEY);

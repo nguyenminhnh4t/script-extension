@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Scenario, Step, StepType } from '../types';
-import { saveScenario } from '../storage';
+import { saveScenario, saveDraft, clearDraft } from '../storage';
 
 const STEP_TYPES: StepType[] = ['open_url', 'fill', 'click', 'select', 'wait', 'wait_for_element'];
 
@@ -26,6 +26,18 @@ interface Props {
 export default function ScenarioEditor({ initial, onSave, onCancel }: Props) {
   const [scenario, setScenario] = useState<Scenario>(initial ?? newScenario());
   const [error, setError] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Persist draft to storage whenever scenario changes so popup restore works
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      saveDraft({ scenario, editingId: initial?.id });
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [scenario, initial?.id]);
 
   function updateField<K extends keyof Scenario>(key: K, value: Scenario[K]) {
     setScenario((prev) => ({ ...prev, [key]: value }));
@@ -79,7 +91,13 @@ export default function ScenarioEditor({ initial, onSave, onCancel }: Props) {
       return;
     }
     await saveScenario(scenario);
+    await clearDraft();
     onSave();
+  }
+
+  async function handleCancel() {
+    await clearDraft();
+    onCancel();
   }
 
   function stepFields(step: Step, index: number) {
@@ -141,7 +159,7 @@ export default function ScenarioEditor({ initial, onSave, onCancel }: Props) {
     <div className="w-[420px] min-h-[500px] bg-gray-950 text-gray-100 flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
         <h1 className="text-base font-semibold">{initial ? 'Edit Scenario' : 'New Scenario'}</h1>
-        <button onClick={onCancel} className="text-gray-400 hover:text-white text-sm">✕</button>
+        <button onClick={handleCancel} className="text-gray-400 hover:text-white text-sm">✕</button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
@@ -199,7 +217,7 @@ export default function ScenarioEditor({ initial, onSave, onCancel }: Props) {
       </div>
 
       <div className="px-4 py-3 border-t border-gray-800 flex justify-end gap-2">
-        <button onClick={onCancel} className="text-sm text-gray-400 hover:text-white px-3 py-1.5">Cancel</button>
+        <button onClick={handleCancel} className="text-sm text-gray-400 hover:text-white px-3 py-1.5">Cancel</button>
         <button onClick={handleSave} className="text-sm bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded text-white">Save</button>
       </div>
     </div>
