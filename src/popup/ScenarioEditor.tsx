@@ -19,14 +19,24 @@ function newScenario(): Scenario {
 
 interface Props {
   initial?: Scenario;
+  pickedSelector?: { stepIndex: number; selector: string } | null;
+  onPickedSelectorConsumed?: () => void;
+  onStartPick?: (stepIndex: number) => void;
   onSave: () => void;
   onCancel: () => void;
 }
 
-export default function ScenarioEditor({ initial, onSave, onCancel }: Props) {
+export default function ScenarioEditor({ initial, pickedSelector, onPickedSelectorConsumed, onStartPick, onSave, onCancel }: Props) {
   const [scenario, setScenario] = useState<Scenario>(initial ?? newScenario());
   const [error, setError] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Apply picked selector when popup reopens with a pick result
+  useEffect(() => {
+    if (!pickedSelector) return;
+    updateStep(pickedSelector.stepIndex, { selector: pickedSelector.selector } as Partial<Step>);
+    onPickedSelectorConsumed?.();
+  }, [pickedSelector]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persist draft to storage whenever scenario changes so popup restore works
   useEffect(() => {
@@ -100,6 +110,27 @@ export default function ScenarioEditor({ initial, onSave, onCancel }: Props) {
     onCancel();
   }
 
+  function selectorRow(value: string, onChange: (v: string) => void, stepIndex: number) {
+    return (
+      <div className="flex gap-1">
+        <input
+          className={inputCls}
+          placeholder="CSS Selector"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <button
+          type="button"
+          title="Pick element from page"
+          onClick={() => onStartPick?.(stepIndex)}
+          className="shrink-0 px-2 py-1 rounded bg-gray-700 hover:bg-blue-600 text-gray-300 hover:text-white text-xs transition-colors"
+        >
+          ⊕
+        </button>
+      </div>
+    );
+  }
+
   function stepFields(step: Step, index: number) {
     switch (step.type) {
       case 'open_url':
@@ -114,16 +145,16 @@ export default function ScenarioEditor({ initial, onSave, onCancel }: Props) {
       case 'fill':
         return (
           <>
-            <input className={inputCls} placeholder="CSS Selector" value={step.selector} onChange={(e) => updateStep(index, { selector: e.target.value })} />
+            {selectorRow(step.selector, (v) => updateStep(index, { selector: v }), index)}
             <input className={inputCls} placeholder="Value" value={step.value} onChange={(e) => updateStep(index, { value: e.target.value })} />
           </>
         );
       case 'click':
-        return <input className={inputCls} placeholder="CSS Selector" value={step.selector} onChange={(e) => updateStep(index, { selector: e.target.value })} />;
+        return selectorRow(step.selector, (v) => updateStep(index, { selector: v }), index);
       case 'select':
         return (
           <>
-            <input className={inputCls} placeholder="CSS Selector" value={step.selector} onChange={(e) => updateStep(index, { selector: e.target.value })} />
+            {selectorRow(step.selector, (v) => updateStep(index, { selector: v }), index)}
             <input className={inputCls} placeholder="Option value" value={step.value} onChange={(e) => updateStep(index, { value: e.target.value })} />
           </>
         );
@@ -140,7 +171,7 @@ export default function ScenarioEditor({ initial, onSave, onCancel }: Props) {
       case 'wait_for_element':
         return (
           <>
-            <input className={inputCls} placeholder="CSS Selector" value={step.selector} onChange={(e) => updateStep(index, { selector: e.target.value })} />
+            {selectorRow(step.selector, (v) => updateStep(index, { selector: v }), index)}
             <input
               className={inputCls}
               type="number"

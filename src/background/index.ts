@@ -10,17 +10,32 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
         type: 'RUN_PROGRESS',
         stepIndex,
         stepLog,
-      }).catch(() => {
-        // Popup may be closed — ignore
-      });
+      }).catch(() => {});
     })
-      .then((log) => {
-        sendResponse({ ok: true, log });
-      })
-      .catch((err: Error) => {
-        sendResponse({ ok: false, error: err.message });
-      });
+      .then((log) => sendResponse({ ok: true, log }))
+      .catch((err: Error) => sendResponse({ ok: false, error: err.message }));
 
     return true;
+  }
+
+  if (message.type === 'START_PICK_MODE') {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const tabId = tabs[0]?.id;
+      if (!tabId) { sendResponse({ ok: false }); return; }
+      try {
+        await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+        await chrome.tabs.sendMessage(tabId, { type: 'START_PICK_MODE' });
+        sendResponse({ ok: true });
+      } catch {
+        sendResponse({ ok: false });
+      }
+    });
+    return true;
+  }
+
+  // PICK_COMPLETE and PICK_CANCELLED come from content script — relay to popup
+  if (message.type === 'PICK_COMPLETE' || message.type === 'PICK_CANCELLED') {
+    chrome.runtime.sendMessage(message).catch(() => {});
+    return false;
   }
 });

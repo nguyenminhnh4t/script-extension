@@ -3,6 +3,25 @@ import type { Scenario, RunLog } from './types';
 const SCENARIOS_KEY = 'scenarios';
 const LOGS_KEY = 'runLogs';
 const DRAFT_KEY = 'editorDraft';
+const PICK_TARGET_KEY = 'pickTarget';
+
+export interface PickTarget {
+  stepIndex: number;
+  selector: string;
+}
+
+export async function getPickTarget(): Promise<PickTarget | undefined> {
+  const result = await chrome.storage.local.get(PICK_TARGET_KEY);
+  return result[PICK_TARGET_KEY] as PickTarget | undefined;
+}
+
+export async function savePickTarget(target: PickTarget): Promise<void> {
+  await chrome.storage.local.set({ [PICK_TARGET_KEY]: target });
+}
+
+export async function clearPickTarget(): Promise<void> {
+  await chrome.storage.local.remove(PICK_TARGET_KEY);
+}
 
 export interface EditorDraft {
   scenario: Scenario;

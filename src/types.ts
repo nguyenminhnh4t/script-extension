@@ -76,4 +76,7 @@ export type RuntimeMessage =
   | { type: 'RUN_SCENARIO'; scenario: Scenario }
   | { type: 'RUN_STEP'; step: Step }
   | { type: 'RUN_COMPLETE'; log: RunLog }
-  | { type: 'RUN_PROGRESS'; stepIndex: number; stepLog: StepLog };
+  | { type: 'RUN_PROGRESS'; stepIndex: number; stepLog: StepLog }
+  | { type: 'START_PICK_MODE' }
+  | { type: 'PICK_COMPLETE'; selector: string }
+  | { type: 'PICK_CANCELLED' };

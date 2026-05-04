@@ -58,11 +58,116 @@ async function executeStep(step: Step): Promise<void> {
   }
 }
 
+// --- Selector generator ---
+
+function buildSelector(el: Element): string {
+  // Prefer id
+  if (el.id) return `#${CSS.escape(el.id)}`;
+
+  // Prefer name attribute (common for inputs)
+  const name = el.getAttribute('name');
+  if (name) return `${el.tagName.toLowerCase()}[name="${CSS.escape(name)}"]`;
+
+  // Try unique class combo
+  if (el.classList.length > 0) {
+    const sel = `${el.tagName.toLowerCase()}.${Array.from(el.classList).map(CSS.escape).join('.')}`;
+    if (document.querySelectorAll(sel).length === 1) return sel;
+  }
+
+  // nth-child fallback
+  const parent = el.parentElement;
+  if (parent) {
+    const index = Array.from(parent.children).indexOf(el) + 1;
+    const parentSel = buildSelector(parent);
+    return `${parentSel} > ${el.tagName.toLowerCase()}:nth-child(${index})`;
+  }
+
+  return el.tagName.toLowerCase();
+}
+
+// --- Pick mode ---
+
+let pickCleanup: (() => void) | null = null;
+
+function startPickMode(): void {
+  if (pickCleanup) return;
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = [
+    'position:fixed', 'inset:0', 'z-index:2147483647',
+    'cursor:crosshair', 'background:transparent',
+  ].join(';');
+
+  const prevOutline = { el: null as HTMLElement | null, value: '' };
+
+  function highlight(target: EventTarget | null): void {
+    if (prevOutline.el) {
+      prevOutline.el.style.outline = prevOutline.value;
+      prevOutline.el = null;
+    }
+    if (target instanceof HTMLElement && target !== overlay) {
+      prevOutline.el = target;
+      prevOutline.value = target.style.outline;
+      target.style.outline = '2px solid #3b82f6';
+    }
+  }
+
+  function onMouseMove(e: MouseEvent): void {
+    overlay.style.pointerEvents = 'none';
+    const real = document.elementFromPoint(e.clientX, e.clientY);
+    overlay.style.pointerEvents = 'auto';
+    highlight(real);
+  }
+
+  function onKeyDown(e: KeyboardEvent): void {
+    if (e.key === 'Escape') cancel();
+  }
+
+  function cancel(): void {
+    cleanup();
+    chrome.runtime.sendMessage({ type: 'PICK_CANCELLED' }).catch(() => {});
+  }
+
+  function onClick(e: MouseEvent): void {
+    e.preventDefault();
+    e.stopPropagation();
+    overlay.style.pointerEvents = 'none';
+    const real = document.elementFromPoint(e.clientX, e.clientY);
+    overlay.style.pointerEvents = 'auto';
+    if (!real) { cancel(); return; }
+    const selector = buildSelector(real);
+    cleanup();
+    chrome.runtime.sendMessage({ type: 'PICK_COMPLETE', selector }).catch(() => {});
+  }
+
+  function cleanup(): void {
+    if (prevOutline.el) {
+      prevOutline.el.style.outline = prevOutline.value;
+    }
+    overlay.removeEventListener('mousemove', onMouseMove);
+    overlay.removeEventListener('click', onClick);
+    document.removeEventListener('keydown', onKeyDown);
+    overlay.remove();
+    pickCleanup = null;
+  }
+
+  pickCleanup = cleanup;
+  overlay.addEventListener('mousemove', onMouseMove);
+  overlay.addEventListener('click', onClick);
+  document.addEventListener('keydown', onKeyDown);
+  document.body.appendChild(overlay);
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'RUN_STEP') {
     executeStep(message.step as Step)
       .then(() => sendResponse({ ok: true }))
       .catch((err: Error) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+  if (message.type === 'START_PICK_MODE') {
+    startPickMode();
+    sendResponse({ ok: true });
     return true;
   }
 });
