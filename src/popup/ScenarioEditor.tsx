@@ -9,12 +9,7 @@ function emptyStep(): Step {
 }
 
 function newScenario(): Scenario {
-  return {
-    id: crypto.randomUUID(),
-    name: '',
-    startUrl: '',
-    steps: [],
-  };
+  return { id: crypto.randomUUID(), name: '', startUrl: '', steps: [] };
 }
 
 interface Props {
@@ -26,27 +21,86 @@ interface Props {
   onCancel: () => void;
 }
 
+// ── SVG icons ──────────────────────────────────────────────────────────────
+const IconClose = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
+const IconChevronUp = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="18 15 12 9 6 15" />
+  </svg>
+);
+const IconChevronDown = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="6 9 12 15 18 9" />
+  </svg>
+);
+const IconTrash = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+    <path d="M10 11v6M14 11v6" />
+    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+  </svg>
+);
+const IconPlus = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);
+const IconCrosshair = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+    <circle cx="12" cy="12" r="4" />
+    <line x1="12" y1="2" x2="12" y2="7" />
+    <line x1="12" y1="17" x2="12" y2="22" />
+    <line x1="2" y1="12" x2="7" y2="12" />
+    <line x1="17" y1="12" x2="22" y2="12" />
+  </svg>
+);
+const IconSave = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+    <polyline points="17 21 17 13 7 13 7 21" />
+    <polyline points="7 3 7 8 15 8" />
+  </svg>
+);
+const IconWarning = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+    <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+  </svg>
+);
+
+// Step type icon labels
+const STEP_ICONS: Record<StepType, string> = {
+  open_url: '🔗',
+  fill: '✏️',
+  click: '👆',
+  select: '☰',
+  wait: '⏱',
+  wait_for_element: '⏳',
+};
+
+// ── Component ──────────────────────────────────────────────────────────────
 export default function ScenarioEditor({ initial, pickedSelector, onPickedSelectorConsumed, onStartPick, onSave, onCancel }: Props) {
   const [scenario, setScenario] = useState<Scenario>(initial ?? newScenario());
   const [error, setError] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Apply picked selector when popup reopens with a pick result
   useEffect(() => {
     if (!pickedSelector) return;
     updateStep(pickedSelector.stepIndex, { selector: pickedSelector.selector } as Partial<Step>);
     onPickedSelectorConsumed?.();
   }, [pickedSelector]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Persist draft to storage whenever scenario changes so popup restore works
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       saveDraft({ scenario, editingId: initial?.id });
     }, 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
   }, [scenario, initial?.id]);
 
   function updateField<K extends keyof Scenario>(key: K, value: Scenario[K]) {
@@ -96,10 +150,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
   }
 
   async function handleSave() {
-    if (!scenario.name.trim()) {
-      setError('Scenario name is required');
-      return;
-    }
+    if (!scenario.name.trim()) { setError('Scenario name is required'); return; }
     await saveScenario(scenario);
     await clearDraft();
     onSave();
@@ -110,9 +161,13 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
     onCancel();
   }
 
+  // Shared styles
+  const inputCls = 'bg-gray-900 border border-gray-700/80 rounded px-2.5 py-1.5 text-xs text-gray-100 w-full focus:outline-none focus:border-blue-500/80 placeholder:text-gray-600 transition-colors';
+  const iconBtn = 'flex items-center justify-center w-6 h-6 rounded transition-colors';
+
   function selectorRow(value: string, onChange: (v: string) => void, stepIndex: number) {
     return (
-      <div className="flex gap-1">
+      <div className="flex gap-1.5">
         <input
           className={inputCls}
           placeholder="CSS Selector"
@@ -123,9 +178,9 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
           type="button"
           title="Pick element from page"
           onClick={() => onStartPick?.(stepIndex)}
-          className="shrink-0 px-2 py-1 rounded bg-gray-700 hover:bg-blue-600 text-gray-300 hover:text-white text-xs transition-colors"
+          className={`${iconBtn} shrink-0 text-gray-400 hover:text-blue-300 hover:bg-blue-950 border border-gray-700/80 hover:border-blue-700/60`}
         >
-          ⊕
+          <IconCrosshair />
         </button>
       </div>
     );
@@ -137,7 +192,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
         return (
           <input
             className={inputCls}
-            placeholder="URL"
+            placeholder="https://..."
             value={step.url}
             onChange={(e) => updateStep(index, { url: e.target.value })}
           />
@@ -146,7 +201,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
         return (
           <>
             {selectorRow(step.selector, (v) => updateStep(index, { selector: v }), index)}
-            <input className={inputCls} placeholder="Value" value={step.value} onChange={(e) => updateStep(index, { value: e.target.value })} />
+            <input className={inputCls} placeholder="Value to fill" value={step.value} onChange={(e) => updateStep(index, { value: e.target.value })} />
           </>
         );
       case 'click':
@@ -184,20 +239,31 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
     }
   }
 
-  const inputCls = 'bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-100 w-full focus:outline-none focus:border-blue-500';
-
   return (
     <div className="w-[420px] min-h-[500px] bg-gray-950 text-gray-100 flex flex-col">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
-        <h1 className="text-base font-semibold">{initial ? 'Edit Scenario' : 'New Scenario'}</h1>
-        <button onClick={handleCancel} className="text-gray-400 hover:text-white text-sm">✕</button>
+
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800/80">
+        <h1 className="text-sm font-semibold text-gray-100">
+          {initial ? 'Edit Scenario' : 'New Scenario'}
+        </h1>
+        <button
+          onClick={handleCancel}
+          className={`${iconBtn} text-gray-500 hover:text-gray-100 hover:bg-gray-800`}
+        >
+          <IconClose />
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-        <div className="bg-yellow-900/30 border border-yellow-700/50 rounded px-3 py-2 text-xs text-yellow-400">
-          ⚠ Do not store production credentials. Config is saved in plaintext locally.
+
+        {/* Security notice */}
+        <div className="flex items-start gap-2 bg-amber-900/20 border border-amber-700/30 rounded-md px-3 py-2 text-xs text-amber-400/80">
+          <span className="shrink-0 mt-px"><IconWarning /></span>
+          <span>Config is saved in plaintext locally. Do not store production credentials.</span>
         </div>
 
+        {/* Scenario meta */}
         <div className="space-y-2">
           <input
             className={inputCls}
@@ -207,7 +273,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
           />
           <input
             className={inputCls}
-            placeholder="Start URL (optional — leave blank to use active tab)"
+            placeholder="Start URL (leave blank to use active tab)"
             value={scenario.startUrl}
             onChange={(e) => updateField('startUrl', e.target.value)}
           />
@@ -215,41 +281,82 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
 
         {error && <p className="text-xs text-red-400">{error}</p>}
 
-        <div className="space-y-2">
-          <p className="text-xs text-gray-400 font-medium uppercase tracking-wide">Steps</p>
+        {/* Steps */}
+        <div className="space-y-1.5">
+          <p className="text-xs text-gray-500 font-medium uppercase tracking-wider px-0.5">Steps</p>
+
           {scenario.steps.map((step, i) => (
-            <div key={i} className="bg-gray-900 border border-gray-800 rounded p-2 space-y-1.5">
-              <div className="flex items-center gap-1.5">
+            <div key={i} className="bg-gray-900/70 border border-gray-800/80 rounded-md overflow-hidden">
+
+              {/* Step header row */}
+              <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-gray-800/60">
+                <span className="text-xs w-4 text-center shrink-0">{STEP_ICONS[step.type]}</span>
                 <select
-                  className="bg-gray-800 border border-gray-700 rounded px-1.5 py-1 text-xs text-gray-100 flex-shrink-0 focus:outline-none"
+                  className="flex-1 bg-transparent border-0 text-xs text-gray-300 focus:outline-none cursor-pointer"
                   value={step.type}
                   onChange={(e) => changeStepType(i, e.target.value as StepType)}
                 >
                   {STEP_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
+                    <option key={t} value={t} className="bg-gray-800">{t}</option>
                   ))}
                 </select>
-                <div className="flex gap-1 ml-auto">
-                  <button onClick={() => moveStep(i, -1)} disabled={i === 0} className="text-gray-500 hover:text-gray-200 disabled:opacity-30 text-xs px-1">↑</button>
-                  <button onClick={() => moveStep(i, 1)} disabled={i === scenario.steps.length - 1} className="text-gray-500 hover:text-gray-200 disabled:opacity-30 text-xs px-1">↓</button>
-                  <button onClick={() => removeStep(i)} className="text-red-500 hover:text-red-400 text-xs px-1">✕</button>
+
+                <div className="flex items-center gap-0.5 ml-auto">
+                  <button
+                    onClick={() => moveStep(i, -1)}
+                    disabled={i === 0}
+                    className={`${iconBtn} text-gray-600 hover:text-gray-300 disabled:opacity-20`}
+                  >
+                    <IconChevronUp />
+                  </button>
+                  <button
+                    onClick={() => moveStep(i, 1)}
+                    disabled={i === scenario.steps.length - 1}
+                    className={`${iconBtn} text-gray-600 hover:text-gray-300 disabled:opacity-20`}
+                  >
+                    <IconChevronDown />
+                  </button>
+                  <button
+                    onClick={() => removeStep(i)}
+                    className={`${iconBtn} text-gray-600 hover:text-red-400`}
+                  >
+                    <IconTrash />
+                  </button>
                 </div>
               </div>
-              {stepFields(step, i)}
+
+              {/* Step fields */}
+              <div className="px-2 py-2 space-y-1.5">
+                {stepFields(step, i)}
+              </div>
             </div>
           ))}
+
           <button
             onClick={addStep}
-            className="w-full text-xs border border-dashed border-gray-700 hover:border-gray-500 text-gray-500 hover:text-gray-300 py-2 rounded"
+            className="w-full flex items-center justify-center gap-1.5 text-xs border border-dashed border-gray-700/80 hover:border-gray-500 text-gray-600 hover:text-gray-300 py-2 rounded-md transition-colors"
           >
-            + Add Step
+            <IconPlus />
+            Add step
           </button>
         </div>
       </div>
 
-      <div className="px-4 py-3 border-t border-gray-800 flex justify-end gap-2">
-        <button onClick={handleCancel} className="text-sm text-gray-400 hover:text-white px-3 py-1.5">Cancel</button>
-        <button onClick={handleSave} className="text-sm bg-blue-600 hover:bg-blue-700 px-4 py-1.5 rounded text-white">Save</button>
+      {/* Footer */}
+      <div className="px-4 py-3 border-t border-gray-800/80 flex items-center justify-end gap-2">
+        <button
+          onClick={handleCancel}
+          className="text-xs text-gray-500 hover:text-gray-200 px-3 py-1.5 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={handleSave}
+          className="flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded text-white transition-colors"
+        >
+          <IconSave />
+          Save
+        </button>
       </div>
     </div>
   );
