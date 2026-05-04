@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Scenario, RunLog, StepLog, RuntimeMessage } from '../types';
-import { getScenarios, deleteScenario, getLastRunLog } from '../storage';
+import { getScenarios, deleteScenario, getLastRunLog, saveScenario } from '../storage';
 
 interface Props {
   onNew: () => void;
@@ -92,6 +92,28 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
     setSelectedLog(log ?? null);
   }
 
+  function handleExport() {
+    const blob = new Blob([JSON.stringify(scenarios, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'scenarios.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const imported = JSON.parse(text) as Scenario[];
+    for (const s of imported) {
+      await saveScenario(s);
+    }
+    const updated = await getScenarios();
+    setScenarios(updated);
+  }
+
   const stateColor: Record<RunState, string> = {
     idle: 'text-gray-400',
     running: 'text-blue-500',
@@ -103,12 +125,29 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
     <div className="w-[420px] min-h-[500px] bg-gray-950 text-gray-100 flex flex-col">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
         <h1 className="text-base font-semibold tracking-wide">Automation Runner</h1>
-        <button
-          onClick={onNew}
-          className="text-sm bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded text-white"
-        >
-          + New
-        </button>
+        <div className="flex gap-2">
+          <label className="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded text-white cursor-pointer">
+            Import
+            <input
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={handleImport}
+            />
+          </label>
+          <button
+            onClick={handleExport}
+            className="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded text-white"
+          >
+            Export
+          </button>
+          <button
+            onClick={onNew}
+            className="text-sm bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded text-white"
+          >
+            + New
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto divide-y divide-gray-800">
