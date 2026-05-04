@@ -100,9 +100,11 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
   }, []);
 
   useEffect(() => {
-    const handler = (message: RuntimeMessage) => {
-      if (message.type === 'RUN_PROGRESS') {
-        const { stepIndex, stepLog } = message;
+    const handler = (message: unknown) => {
+      if (!message || typeof message !== 'object') return;
+      const msg = message as RuntimeMessage;
+      if (msg.type === 'RUN_PROGRESS') {
+        const { stepIndex, stepLog } = msg;
         setRunStatuses((prev) => {
           const entry = Object.entries(prev).find(([, v]) => v.state === 'running');
           if (!entry) return prev;

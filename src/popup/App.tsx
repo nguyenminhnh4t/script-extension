@@ -29,9 +29,11 @@ export default function App() {
 
   useEffect(() => {
     // Listen for PICK_COMPLETE coming back from background while popup is open
-    const handler = (message: { type: string; selector?: string }) => {
-      if (message.type === 'PICK_COMPLETE' && message.selector != null && pickingStepRef.current != null) {
-        setPickedSelector({ stepIndex: pickingStepRef.current, selector: message.selector });
+    const handler = (message: unknown) => {
+      if (!message || typeof message !== 'object') return;
+      const msg = message as Record<string, unknown>;
+      if (msg['type'] === 'PICK_COMPLETE' && typeof msg['selector'] === 'string' && pickingStepRef.current != null) {
+        setPickedSelector({ stepIndex: pickingStepRef.current, selector: msg['selector'] });
         pickingStepRef.current = null;
       }
     };
