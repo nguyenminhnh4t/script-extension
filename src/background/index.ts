@@ -1,5 +1,6 @@
 import type { RuntimeMessage, StepLog } from '../types';
 import { runScenario } from './runner';
+import { getPickTarget, savePickTarget } from '../storage';
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
   if (message.type === 'RUN_SCENARIO') {
@@ -33,8 +34,20 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     return true;
   }
 
-  // PICK_COMPLETE and PICK_CANCELLED come from content script — relay to popup
-  if (message.type === 'PICK_COMPLETE' || message.type === 'PICK_CANCELLED') {
+  // PICK_COMPLETE: write selector into storage (popup may already be closed),
+  // then try to relay to popup if it's still open.
+  if (message.type === 'PICK_COMPLETE') {
+    const selector = message.selector;
+    getPickTarget().then((existing) => {
+      if (existing) {
+        savePickTarget({ stepIndex: existing.stepIndex, selector });
+      }
+    });
+    chrome.runtime.sendMessage(message).catch(() => {});
+    return false;
+  }
+
+  if (message.type === 'PICK_CANCELLED') {
     chrome.runtime.sendMessage(message).catch(() => {});
     return false;
   }

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Scenario } from '../types';
-import { getDraft, getPickTarget, clearPickTarget, savePickTarget } from '../storage';
+import { getDraft, getPickTarget, clearPickTarget } from '../storage';
 import ScenarioList from './ScenarioList';
 import ScenarioEditor from './ScenarioEditor';
 
@@ -31,9 +31,7 @@ export default function App() {
     // Listen for PICK_COMPLETE coming back from background while popup is open
     const handler = (message: { type: string; selector?: string }) => {
       if (message.type === 'PICK_COMPLETE' && message.selector != null && pickingStepRef.current != null) {
-        const result = { stepIndex: pickingStepRef.current, selector: message.selector };
-        savePickTarget(result);
-        setPickedSelector(result);
+        setPickedSelector({ stepIndex: pickingStepRef.current, selector: message.selector });
         pickingStepRef.current = null;
       }
     };
@@ -43,7 +41,8 @@ export default function App() {
 
   async function handleStartPick(stepIndex: number) {
     pickingStepRef.current = stepIndex;
-    // Save which step is waiting for a pick so we can restore it if popup closes
+    // Save which step is waiting for a pick so background can write selector when popup closes
+    const { savePickTarget } = await import('../storage');
     await savePickTarget({ stepIndex, selector: '' });
     chrome.runtime.sendMessage({ type: 'START_PICK_MODE' }).catch(() => {});
   }
