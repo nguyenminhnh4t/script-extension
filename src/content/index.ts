@@ -55,10 +55,36 @@ async function executeStep(step: Step): Promise<void> {
     }
     case 'press': {
       const target = (document.activeElement as HTMLElement | null) ?? document.body;
-      const init: KeyboardEventInit = { key: step.key, bubbles: true, cancelable: true };
+      // keyCode lookup for common keys — required by legacy event handlers
+      const keyCodes: Record<string, number> = {
+        Enter: 13, Tab: 9, Escape: 27, Space: 32, Backspace: 8, Delete: 46,
+        ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39,
+        Home: 36, End: 35, PageUp: 33, PageDown: 34, F1: 112, F2: 113,
+        F3: 114, F4: 115, F5: 116, F12: 123,
+      };
+      const keyCode = keyCodes[step.key] ?? (step.key.length === 1 ? step.key.charCodeAt(0) : 0);
+      const init: KeyboardEventInit = {
+        key: step.key,
+        code: step.key.length === 1 ? `Key${step.key.toUpperCase()}` : step.key,
+        keyCode,
+        which: keyCode,
+        charCode: step.key === 'Enter' ? 13 : step.key.length === 1 ? step.key.charCodeAt(0) : 0,
+        bubbles: true,
+        cancelable: true,
+        view: window,
+      };
       target.dispatchEvent(new KeyboardEvent('keydown', init));
       target.dispatchEvent(new KeyboardEvent('keypress', init));
       target.dispatchEvent(new KeyboardEvent('keyup', init));
+      // For Enter on a form element — also submit the form
+      if (step.key === 'Enter' && target instanceof HTMLInputElement && target.form) {
+        const submitBtn = target.form.querySelector<HTMLButtonElement>('button[type="submit"], input[type="submit"]');
+        if (submitBtn) {
+          submitBtn.click();
+        } else {
+          target.form.requestSubmit();
+        }
+      }
       break;
     }
     default:
