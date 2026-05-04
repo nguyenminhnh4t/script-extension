@@ -178,7 +178,7 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
   const iconBtn = 'flex items-center justify-center w-7 h-7 rounded transition-colors';
 
   return (
-    <div className="w-[420px] min-h-[500px] bg-gray-950 text-gray-100 flex flex-col">
+    <div className="w-full min-h-screen bg-gray-950 text-gray-100 flex flex-col">
 
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800/80">

@@ -3,14 +3,15 @@
   "name": "Simple Automation Runner",
   "version": "1.0.0",
   "description": "Config-driven browser task runner",
-  "permissions": ["storage", "tabs", "scripting", "activeTab"],
+  "permissions": ["storage", "tabs", "scripting", "activeTab", "sidePanel"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
-  "action": {
-    "default_popup": "popup.html"
+  "action": {},
+  "side_panel": {
+    "default_path": "popup.html"
   },
   "web_accessible_resources": [
     {

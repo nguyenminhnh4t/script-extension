@@ -2,6 +2,13 @@ import type { RuntimeMessage, StepLog } from '../types';
 import { runScenario } from './runner';
 import { getPickTarget, savePickTarget } from '../storage';
 
+// Open side panel when user clicks the extension icon
+chrome.action.onClicked.addListener((tab) => {
+  if (tab.windowId != null) {
+    chrome.sidePanel.open({ windowId: tab.windowId });
+  }
+});
+
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
   if (message.type === 'RUN_SCENARIO') {
     const scenario = message.scenario;
