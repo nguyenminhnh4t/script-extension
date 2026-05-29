@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Scenario, RunLog, StepLog, RuntimeMessage } from '../types';
-import { getScenarios, deleteScenario, getLastRunLog, saveScenario } from '../storage';
+import { getScenarios, deleteScenario, getLastRunLog, saveScenario, normalizeScenario } from '../storage';
 
 interface Props {
   onNew: () => void;
@@ -119,7 +119,7 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
                     ...prev[id].log!,
                     steps: [
                       ...(prev[id].log?.steps ?? []).filter(
-                        (s: StepLog) => s.stepIndex !== stepIndex
+                        (s: StepLog) => s.stepIndex !== stepIndex || s.tabIndex !== stepLog.tabIndex
                       ),
                       stepLog,
                     ],
@@ -171,13 +171,17 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
     const file = e.target.files?.[0];
     if (!file) return;
     const text = await file.text();
-    const imported = JSON.parse(text) as Scenario[];
+    const parsed = JSON.parse(text) as unknown;
+    const imported = Array.isArray(parsed)
+      ? parsed.map(normalizeScenario).filter((s): s is Scenario => s !== null)
+      : [];
     for (const s of imported) await saveScenario(s);
     setScenarios(await getScenarios());
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
   const iconBtn = 'flex items-center justify-center w-7 h-7 rounded transition-colors';
+  const getStepCount = (scenario: Scenario) => scenario.tabs.reduce((sum, tab) => sum + tab.steps.length, 0);
 
   return (
     <div className="w-full min-h-screen bg-gray-950 text-gray-100 flex flex-col">
@@ -227,12 +231,13 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
         {scenarios.map((s) => {
           const status = runStatuses[s.id] ?? { state: 'idle' };
           const isRunning = status.state === 'running';
+          const stepCount = getStepCount(s);
 
           const statusBar = (
             status.state === 'running' ? (
               <div className="flex items-center gap-1.5 text-xs text-blue-400 mt-1.5 pl-0.5">
                 <IconSpinner />
-                <span>Step {(status.currentStep ?? 0) + 1} of {s.steps.length}</span>
+                <span>Step {(status.currentStep ?? 0) + 1} of {stepCount}</span>
               </div>
             ) : status.state === 'success' ? (
               <div className="flex items-center gap-1.5 text-xs text-emerald-400 mt-1.5 pl-0.5">
@@ -268,12 +273,12 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
               <div className="flex items-start gap-2">
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-100 leading-snug truncate">{s.name}</p>
-                  {s.startUrl && (
-                    <p className="text-xs text-gray-500 truncate mt-0.5">{s.startUrl}</p>
+                  {s.tabs[0]?.startUrl && (
+                    <p className="text-xs text-gray-500 truncate mt-0.5">{s.tabs[0].startUrl}</p>
                   )}
                   {/* Step count pill */}
                   <p className="text-xs text-gray-600 mt-1">
-                    {s.steps.length} step{s.steps.length !== 1 ? 's' : ''}
+                    {s.tabs.length} tab{s.tabs.length !== 1 ? 's' : ''} · {stepCount} step{stepCount !== 1 ? 's' : ''}
                   </p>
                 </div>
 
@@ -338,7 +343,7 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1.5">
             {selectedLog.steps.map((sl) => (
               <div
-                key={sl.stepIndex}
+                key={`${sl.tabIndex}-${sl.stepIndex}`}
                 className={`flex items-start gap-2 text-xs rounded-md px-2.5 py-1.5 ${
                   sl.status === 'success' ? 'bg-emerald-900/20 text-emerald-300' : 'bg-red-900/20 text-red-300'
                 }`}
@@ -347,7 +352,7 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
                   {sl.status === 'success' ? <IconCheck /> : <IconAlert />}
                 </span>
                 <span>
-                  <span className="font-mono text-gray-400">#{sl.stepIndex + 1}</span>
+                  <span className="font-mono text-gray-400">{sl.tabName} #{sl.stepIndex + 1}</span>
                   <span className="ml-1.5 text-gray-300">{sl.type}</span>
                   {sl.error && <span className="ml-2 text-red-300">{sl.error}</span>}
                 </span>

@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('E:/script-extension/node_modules/tailwindcss/package.json'\\)\\); print\\(json.dumps\\({k:d[k] for k in ['main','module','exports'] if k in d}, indent=2\\)\\)\")",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('E:/script-extension/node_modules/tailwindcss/dist/lib.mjs'.replace\\('/', chr\\(47\\)\\)\\)\\); print\\('ok'\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); tw=d['packages'].get\\('node_modules/tailwindcss',{}\\); print\\(tw.get\\('version','not found'\\)\\)\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('peerDependencies', 'none'\\)\\)\")",
+      "Bash(python3 -c ' *)",
+      "Bash(git -C /e/script-extension status)",
+      "Bash(git -C /e/script-extension add manifest.json package.json postcss.config.js tailwind.config.ts tsconfig.json vite.config.ts .gitignore package-lock.json)",
+      "Bash(git -C /e/script-extension commit -m ' *)",
+      "Bash(npm run *)"
+    ]
+  }
+}

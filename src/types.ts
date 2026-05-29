@@ -55,16 +55,27 @@ export type Step =
   | WaitForElementStep
   | PressStep;
 
-export interface Scenario {
+export interface ScenarioTab {
   id: string;
   name: string;
   startUrl: string;
   steps: Step[];
 }
 
+export interface Scenario {
+  id: string;
+  name: string;
+  tabs: ScenarioTab[];
+  /** Legacy single-tab fields, normalized into tabs when loaded. */
+  startUrl?: string;
+  steps?: Step[];
+}
+
 export type StepStatus = 'pending' | 'success' | 'error';
 
 export interface StepLog {
+  tabIndex: number;
+  tabName: string;
   stepIndex: number;
   type: StepType;
   status: StepStatus;

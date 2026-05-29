@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Scenario, Step, StepType } from '../types';
-import { saveScenario, saveDraft, clearDraft } from '../storage';
+import type { Scenario, ScenarioTab, Step, StepType } from '../types';
+import { saveScenario, saveDraft, clearDraft, normalizeScenario } from '../storage';
 
 const STEP_TYPES: StepType[] = ['open_url', 'fill', 'click', 'select', 'wait', 'wait_for_element', 'press'];
 
@@ -8,18 +8,22 @@ function emptyStep(): Step {
   return { type: 'fill', selector: '', value: '' };
 }
 
+function emptyTab(index: number): ScenarioTab {
+  return { id: crypto.randomUUID(), name: `Tab ${index + 1}`, startUrl: '', steps: [] };
+}
+
 function newScenario(): Scenario {
-  return { id: crypto.randomUUID(), name: '', startUrl: '', steps: [] };
+  return { id: crypto.randomUUID(), name: '', tabs: [emptyTab(0)] };
 }
 
 interface Props {
   initial?: Scenario;
-  pickedSelector?: { stepIndex: number; selector: string } | null;
+  pickedSelector?: { tabIndex: number; stepIndex: number; selector: string } | null;
   onPickedSelectorConsumed?: () => void;
-  onStartPick?: (stepIndex: number) => void;
-  recordedKey?: { stepIndex: number; key: string } | null;
+  onStartPick?: (tabIndex: number, stepIndex: number) => void;
+  recordedKey?: { tabIndex: number; stepIndex: number; key: string } | null;
   onRecordedKeyConsumed?: () => void;
-  onStartRecordKey?: (stepIndex: number) => void;
+  onStartRecordKey?: (tabIndex: number, stepIndex: number) => void;
   onSave: () => void;
   onCancel: () => void;
 }
@@ -99,21 +103,28 @@ const STEP_ICONS: Record<StepType, string> = {
 
 // ── Component ──────────────────────────────────────────────────────────────
 export default function ScenarioEditor({ initial, pickedSelector, onPickedSelectorConsumed, onStartPick, recordedKey, onRecordedKeyConsumed, onStartRecordKey, onSave, onCancel }: Props) {
-  const [scenario, setScenario] = useState<Scenario>(initial ?? newScenario());
+  const [scenario, setScenario] = useState<Scenario>(() => normalizeScenario(initial) ?? newScenario());
+  const [activeTabIndex, setActiveTabIndex] = useState(0);
   const [error, setError] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!pickedSelector) return;
-    updateStep(pickedSelector.stepIndex, { selector: pickedSelector.selector } as Partial<Step>);
+    updateStep(pickedSelector.tabIndex, pickedSelector.stepIndex, { selector: pickedSelector.selector } as Partial<Step>);
     onPickedSelectorConsumed?.();
   }, [pickedSelector]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!recordedKey) return;
-    updateStep(recordedKey.stepIndex, { key: recordedKey.key } as Partial<Step>);
+    updateStep(recordedKey.tabIndex, recordedKey.stepIndex, { key: recordedKey.key } as Partial<Step>);
     onRecordedKeyConsumed?.();
   }, [recordedKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (activeTabIndex >= scenario.tabs.length) {
+      setActiveTabIndex(Math.max(0, scenario.tabs.length - 1));
+    }
+  }, [activeTabIndex, scenario.tabs.length]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -127,15 +138,27 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
     setScenario((prev) => ({ ...prev, [key]: value }));
   }
 
-  function updateStep(index: number, partial: Partial<Step>) {
+  function updateTabField<K extends keyof ScenarioTab>(tabIndex: number, key: K, value: ScenarioTab[K]) {
+    setScenario((prev) => ({
+      ...prev,
+      tabs: prev.tabs.map((tab, i) => (i === tabIndex ? { ...tab, [key]: value } : tab)),
+    }));
+  }
+
+  function updateStep(tabIndex: number, index: number, partial: Partial<Step>) {
     setScenario((prev) => {
-      const steps = [...prev.steps];
+      const tab = prev.tabs[tabIndex];
+      if (!tab) return prev;
+      const steps = [...tab.steps];
+      if (!steps[index]) return prev;
       steps[index] = { ...steps[index], ...partial } as Step;
-      return { ...prev, steps };
+      const tabs = [...prev.tabs];
+      tabs[tabIndex] = { ...tab, steps };
+      return { ...prev, tabs };
     });
   }
 
-  function changeStepType(index: number, type: StepType) {
+  function changeStepType(tabIndex: number, index: number, type: StepType) {
     const defaults: Record<StepType, Step> = {
       open_url: { type: 'open_url', url: '' },
       fill: { type: 'fill', selector: '', value: '' },
@@ -146,27 +169,60 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
       press: { type: 'press', key: '' },
     };
     setScenario((prev) => {
-      const steps = [...prev.steps];
+      const tab = prev.tabs[tabIndex];
+      if (!tab) return prev;
+      const steps = [...tab.steps];
       steps[index] = defaults[type];
-      return { ...prev, steps };
+      const tabs = [...prev.tabs];
+      tabs[tabIndex] = { ...tab, steps };
+      return { ...prev, tabs };
     });
   }
 
-  function addStep() {
-    setScenario((prev) => ({ ...prev, steps: [...prev.steps, emptyStep()] }));
-  }
-
-  function removeStep(index: number) {
-    setScenario((prev) => ({ ...prev, steps: prev.steps.filter((_, i) => i !== index) }));
-  }
-
-  function moveStep(index: number, direction: -1 | 1) {
+  function addTab() {
     setScenario((prev) => {
-      const steps = [...prev.steps];
+      const tabs = [...prev.tabs, emptyTab(prev.tabs.length)];
+      setActiveTabIndex(tabs.length - 1);
+      return { ...prev, tabs };
+    });
+  }
+
+  function removeTab(tabIndex: number) {
+    setScenario((prev) => {
+      if (prev.tabs.length <= 1) return prev;
+      return { ...prev, tabs: prev.tabs.filter((_, i) => i !== tabIndex) };
+    });
+  }
+
+  function addStep(tabIndex: number) {
+    setScenario((prev) => ({
+      ...prev,
+      tabs: prev.tabs.map((tab, i) => (
+        i === tabIndex ? { ...tab, steps: [...tab.steps, emptyStep()] } : tab
+      )),
+    }));
+  }
+
+  function removeStep(tabIndex: number, index: number) {
+    setScenario((prev) => ({
+      ...prev,
+      tabs: prev.tabs.map((tab, i) => (
+        i === tabIndex ? { ...tab, steps: tab.steps.filter((_, stepIndex) => stepIndex !== index) } : tab
+      )),
+    }));
+  }
+
+  function moveStep(tabIndex: number, index: number, direction: -1 | 1) {
+    setScenario((prev) => {
+      const tab = prev.tabs[tabIndex];
+      if (!tab) return prev;
+      const steps = [...tab.steps];
       const target = index + direction;
       if (target < 0 || target >= steps.length) return prev;
       [steps[index], steps[target]] = [steps[target], steps[index]];
-      return { ...prev, steps };
+      const tabs = [...prev.tabs];
+      tabs[tabIndex] = { ...tab, steps };
+      return { ...prev, tabs };
     });
   }
 
@@ -185,8 +241,9 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
   // Shared styles
   const inputCls = 'bg-gray-900 border border-gray-700/80 rounded px-2.5 py-1.5 text-xs text-gray-100 w-full focus:outline-none focus:border-blue-500/80 placeholder:text-gray-600 transition-colors';
   const iconBtn = 'flex items-center justify-center w-6 h-6 rounded transition-colors';
+  const activeTab = scenario.tabs[activeTabIndex] ?? scenario.tabs[0];
 
-  function selectorRow(value: string, onChange: (v: string) => void, stepIndex: number) {
+  function selectorRow(value: string, onChange: (v: string) => void, tabIndex: number, stepIndex: number) {
     return (
       <div className="flex gap-1.5">
         <input
@@ -198,7 +255,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
         <button
           type="button"
           title="Pick element from page"
-          onClick={() => onStartPick?.(stepIndex)}
+          onClick={() => onStartPick?.(tabIndex, stepIndex)}
           className={`${iconBtn} shrink-0 text-gray-400 hover:text-blue-300 hover:bg-blue-950 border border-gray-700/80 hover:border-blue-700/60`}
         >
           <IconCrosshair />
@@ -207,7 +264,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
     );
   }
 
-  function stepFields(step: Step, index: number) {
+  function stepFields(step: Step, tabIndex: number, index: number) {
     switch (step.type) {
       case 'open_url':
         return (
@@ -215,23 +272,23 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
             className={inputCls}
             placeholder="https://..."
             value={step.url}
-            onChange={(e) => updateStep(index, { url: e.target.value })}
+            onChange={(e) => updateStep(tabIndex, index, { url: e.target.value })}
           />
         );
       case 'fill':
         return (
           <>
-            {selectorRow(step.selector, (v) => updateStep(index, { selector: v }), index)}
-            <input className={inputCls} placeholder="Value to fill" value={step.value} onChange={(e) => updateStep(index, { value: e.target.value })} />
+            {selectorRow(step.selector, (v) => updateStep(tabIndex, index, { selector: v }), tabIndex, index)}
+            <input className={inputCls} placeholder="Value to fill" value={step.value} onChange={(e) => updateStep(tabIndex, index, { value: e.target.value })} />
           </>
         );
       case 'click':
-        return selectorRow(step.selector, (v) => updateStep(index, { selector: v }), index);
+        return selectorRow(step.selector, (v) => updateStep(tabIndex, index, { selector: v }), tabIndex, index);
       case 'select':
         return (
           <>
-            {selectorRow(step.selector, (v) => updateStep(index, { selector: v }), index)}
-            <input className={inputCls} placeholder="Option value" value={step.value} onChange={(e) => updateStep(index, { value: e.target.value })} />
+            {selectorRow(step.selector, (v) => updateStep(tabIndex, index, { selector: v }), tabIndex, index)}
+            <input className={inputCls} placeholder="Option value" value={step.value} onChange={(e) => updateStep(tabIndex, index, { value: e.target.value })} />
           </>
         );
       case 'wait':
@@ -241,19 +298,19 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
             type="number"
             placeholder="Duration (ms)"
             value={step.duration}
-            onChange={(e) => updateStep(index, { duration: Number(e.target.value) })}
+            onChange={(e) => updateStep(tabIndex, index, { duration: Number(e.target.value) })}
           />
         );
       case 'wait_for_element':
         return (
           <>
-            {selectorRow(step.selector, (v) => updateStep(index, { selector: v }), index)}
+            {selectorRow(step.selector, (v) => updateStep(tabIndex, index, { selector: v }), tabIndex, index)}
             <input
               className={inputCls}
               type="number"
               placeholder="Timeout (ms)"
               value={step.timeout}
-              onChange={(e) => updateStep(index, { timeout: Number(e.target.value) })}
+              onChange={(e) => updateStep(tabIndex, index, { timeout: Number(e.target.value) })}
             />
           </>
         );
@@ -264,12 +321,12 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
               className={inputCls}
               placeholder='Key — e.g. Enter, Tab, Escape, a'
               value={step.key}
-              onChange={(e) => updateStep(index, { key: e.target.value })}
+              onChange={(e) => updateStep(tabIndex, index, { key: e.target.value })}
             />
             <button
               type="button"
               title="Record key from page"
-              onClick={() => onStartRecordKey?.(index)}
+              onClick={() => onStartRecordKey?.(tabIndex, index)}
               className={`${iconBtn} shrink-0 text-gray-400 hover:text-purple-300 hover:bg-purple-950 border border-gray-700/80 hover:border-purple-700/60`}
             >
               <IconKeyboard />
@@ -311,21 +368,72 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
             value={scenario.name}
             onChange={(e) => updateField('name', e.target.value)}
           />
-          <input
-            className={inputCls}
-            placeholder="Start URL (leave blank to use active tab)"
-            value={scenario.startUrl}
-            onChange={(e) => updateField('startUrl', e.target.value)}
-          />
         </div>
 
         {error && <p className="text-xs text-red-400">{error}</p>}
 
+        {/* Tabs */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-1 overflow-x-auto">
+            {scenario.tabs.map((tab, i) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTabIndex(i)}
+                className={`shrink-0 rounded px-2.5 py-1.5 text-xs transition-colors ${
+                  i === activeTabIndex
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-gray-900 text-gray-400 hover:bg-gray-800 hover:text-gray-200'
+                }`}
+              >
+                {tab.name || `Tab ${i + 1}`}
+              </button>
+            ))}
+            <button
+              type="button"
+              title="Add tab"
+              onClick={addTab}
+              className={`${iconBtn} shrink-0 text-blue-400 hover:text-blue-300 hover:bg-blue-950 border border-gray-800`}
+            >
+              <IconPlus />
+            </button>
+          </div>
+
+          {activeTab && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-[1fr_auto] gap-1.5">
+                <input
+                  className={inputCls}
+                  placeholder="Tab name"
+                  value={activeTab.name}
+                  onChange={(e) => updateTabField(activeTabIndex, 'name', e.target.value)}
+                />
+                <button
+                  type="button"
+                  title="Delete tab"
+                  onClick={() => removeTab(activeTabIndex)}
+                  disabled={scenario.tabs.length <= 1}
+                  className={`${iconBtn} text-gray-600 hover:text-red-400 disabled:opacity-20`}
+                >
+                  <IconTrash />
+                </button>
+              </div>
+              <input
+                className={inputCls}
+                placeholder="Tab start URL (blank uses active tab for first tab)"
+                value={activeTab.startUrl}
+                onChange={(e) => updateTabField(activeTabIndex, 'startUrl', e.target.value)}
+              />
+            </div>
+          )}
+        </div>
+
         {/* Steps */}
+        {activeTab && (
         <div className="space-y-1.5">
           <p className="text-xs text-gray-500 font-medium uppercase tracking-wider px-0.5">Steps</p>
 
-          {scenario.steps.map((step, i) => (
+          {activeTab.steps.map((step, i) => (
             <div key={i} className="bg-gray-900/70 border border-gray-800/80 rounded-md overflow-hidden">
 
               {/* Step header row */}
@@ -334,7 +442,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
                 <select
                   className="flex-1 bg-transparent border-0 text-xs text-gray-300 focus:outline-none cursor-pointer"
                   value={step.type}
-                  onChange={(e) => changeStepType(i, e.target.value as StepType)}
+                  onChange={(e) => changeStepType(activeTabIndex, i, e.target.value as StepType)}
                 >
                   {STEP_TYPES.map((t) => (
                     <option key={t} value={t} className="bg-gray-800">{t}</option>
@@ -343,21 +451,21 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
 
                 <div className="flex items-center gap-0.5 ml-auto">
                   <button
-                    onClick={() => moveStep(i, -1)}
+                    onClick={() => moveStep(activeTabIndex, i, -1)}
                     disabled={i === 0}
                     className={`${iconBtn} text-gray-600 hover:text-gray-300 disabled:opacity-20`}
                   >
                     <IconChevronUp />
                   </button>
                   <button
-                    onClick={() => moveStep(i, 1)}
-                    disabled={i === scenario.steps.length - 1}
+                    onClick={() => moveStep(activeTabIndex, i, 1)}
+                    disabled={i === activeTab.steps.length - 1}
                     className={`${iconBtn} text-gray-600 hover:text-gray-300 disabled:opacity-20`}
                   >
                     <IconChevronDown />
                   </button>
                   <button
-                    onClick={() => removeStep(i)}
+                    onClick={() => removeStep(activeTabIndex, i)}
                     className={`${iconBtn} text-gray-600 hover:text-red-400`}
                   >
                     <IconTrash />
@@ -367,19 +475,20 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
 
               {/* Step fields */}
               <div className="px-2 py-2 space-y-1.5">
-                {stepFields(step, i)}
+                {stepFields(step, activeTabIndex, i)}
               </div>
             </div>
           ))}
 
           <button
-            onClick={addStep}
+            onClick={() => addStep(activeTabIndex)}
             className="w-full flex items-center justify-center gap-1.5 text-xs border border-dashed border-gray-700/80 hover:border-gray-500 text-gray-600 hover:text-gray-300 py-2 rounded-md transition-colors"
           >
             <IconPlus />
             Add step
           </button>
         </div>
+        )}
       </div>
 
       {/* Footer */}

@@ -47,7 +47,7 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     const selector = message.selector;
     getPickTarget().then((existing) => {
       if (existing) {
-        savePickTarget({ stepIndex: existing.stepIndex, selector });
+        savePickTarget({ tabIndex: existing.tabIndex, stepIndex: existing.stepIndex, selector });
       }
     });
     chrome.runtime.sendMessage(message).catch(() => {});
