@@ -18,6 +18,10 @@ function numberValue(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function booleanValue(value: unknown, fallback = false): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
 function normalizeStep(value: unknown): Step | null {
   if (!isRecord(value) || !STEP_TYPES.includes(value.type as StepType)) return null;
 
@@ -46,30 +50,49 @@ function normalizeStep(value: unknown): Step | null {
 export function normalizeScenario(value: unknown): Scenario | null {
   if (!isRecord(value)) return null;
 
+  const legacyWindowConfig = {
+    openInNewWindow: booleanValue(value.openInNewWindow),
+    windowWidth: Math.max(320, Math.round(numberValue(value.windowWidth, 1280))),
+    windowHeight: Math.max(240, Math.round(numberValue(value.windowHeight, 800))),
+  };
   const rawTabs = Array.isArray(value.tabs) ? value.tabs : null;
   const tabs = rawTabs
-    ? rawTabs.map(normalizeScenarioTab).filter((tab): tab is ScenarioTab => tab !== null)
+    ? rawTabs.map((tab) => normalizeScenarioTab(tab, legacyWindowConfig)).filter((tab): tab is ScenarioTab => tab !== null)
     : [normalizeScenarioTab({
         id: 'tab-1',
         name: 'Tab 1',
         startUrl: value.startUrl,
         steps: value.steps,
-      })].filter((tab): tab is ScenarioTab => tab !== null);
+      }, legacyWindowConfig)].filter((tab): tab is ScenarioTab => tab !== null);
 
   return {
     id: stringValue(value.id, crypto.randomUUID()),
     name: stringValue(value.name, 'Untitled scenario'),
-    tabs: tabs.length > 0 ? tabs : [{ id: crypto.randomUUID(), name: 'Tab 1', startUrl: '', steps: [] }],
+    tabs: tabs.length > 0 ? tabs : [{
+      id: crypto.randomUUID(),
+      name: 'Tab 1',
+      startUrl: '',
+      openInNewWindow: legacyWindowConfig.openInNewWindow,
+      windowWidth: legacyWindowConfig.windowWidth,
+      windowHeight: legacyWindowConfig.windowHeight,
+      steps: [],
+    }],
   };
 }
 
-function normalizeScenarioTab(value: unknown): ScenarioTab | null {
+function normalizeScenarioTab(
+  value: unknown,
+  fallbackWindowConfig = { openInNewWindow: false, windowWidth: 1280, windowHeight: 800 }
+): ScenarioTab | null {
   if (!isRecord(value)) return null;
   const rawSteps = Array.isArray(value.steps) ? value.steps : [];
   return {
     id: stringValue(value.id, crypto.randomUUID()),
     name: stringValue(value.name, 'Tab'),
     startUrl: stringValue(value.startUrl),
+    openInNewWindow: booleanValue(value.openInNewWindow, fallbackWindowConfig.openInNewWindow),
+    windowWidth: Math.max(320, Math.round(numberValue(value.windowWidth, fallbackWindowConfig.windowWidth))),
+    windowHeight: Math.max(240, Math.round(numberValue(value.windowHeight, fallbackWindowConfig.windowHeight))),
     steps: rawSteps.map(normalizeStep).filter((step): step is Step => step !== null),
   };
 }
@@ -92,6 +115,7 @@ function normalizeStepLog(value: unknown): StepLog | null {
 function normalizeRunLog(value: unknown): RunLog | null {
   if (!isRecord(value)) return null;
   const rawSteps = Array.isArray(value.steps) ? value.steps : [];
+  const rawCleanupTabIds = Array.isArray(value.cleanupTabIds) ? value.cleanupTabIds : [];
   return {
     scenarioId: stringValue(value.scenarioId),
     scenarioName: stringValue(value.scenarioName, 'Untitled scenario'),
@@ -99,6 +123,7 @@ function normalizeRunLog(value: unknown): RunLog | null {
     endedAt: stringValue(value.endedAt),
     status: value.status === 'success' ? 'success' : 'error',
     steps: rawSteps.map(normalizeStepLog).filter((step): step is StepLog => step !== null),
+    cleanupTabIds: rawCleanupTabIds.filter((id): id is number => typeof id === 'number' && Number.isInteger(id)),
   };
 }
 

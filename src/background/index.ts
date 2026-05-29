@@ -26,6 +26,17 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResp
     return true;
   }
 
+  if (message.type === 'CLEANUP_TABS') {
+    Promise.allSettled(message.tabIds.map((tabId) => chrome.tabs.remove(tabId)))
+      .then((results) => {
+        const closed = results.filter((result) => result.status === 'fulfilled').length;
+        sendResponse({ ok: true, closed });
+      })
+      .catch((err: Error) => sendResponse({ ok: false, error: err.message }));
+
+    return true;
+  }
+
   if (message.type === 'START_PICK_MODE') {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       const tabId = tabs[0]?.id;

@@ -59,6 +59,9 @@ export interface ScenarioTab {
   id: string;
   name: string;
   startUrl: string;
+  openInNewWindow: boolean;
+  windowWidth: number;
+  windowHeight: number;
   steps: Step[];
 }
 
@@ -66,6 +69,10 @@ export interface Scenario {
   id: string;
   name: string;
   tabs: ScenarioTab[];
+  /** Legacy window fields, normalized into tabs when loaded. */
+  openInNewWindow?: boolean;
+  windowWidth?: number;
+  windowHeight?: number;
   /** Legacy single-tab fields, normalized into tabs when loaded. */
   startUrl?: string;
   steps?: Step[];
@@ -89,6 +96,7 @@ export interface RunLog {
   endedAt: string;
   status: 'success' | 'error';
   steps: StepLog[];
+  cleanupTabIds: number[];
 }
 
 export type RuntimeMessage =
@@ -96,6 +104,7 @@ export type RuntimeMessage =
   | { type: 'RUN_STEP'; step: Step }
   | { type: 'RUN_COMPLETE'; log: RunLog }
   | { type: 'RUN_PROGRESS'; stepIndex: number; stepLog: StepLog }
+  | { type: 'CLEANUP_TABS'; tabIds: number[] }
   | { type: 'START_PICK_MODE' }
   | { type: 'PICK_COMPLETE'; selector: string }
   | { type: 'PICK_CANCELLED' }

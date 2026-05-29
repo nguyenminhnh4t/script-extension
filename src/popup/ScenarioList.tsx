@@ -141,10 +141,40 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
       scenario,
     });
     if (response.ok && response.log) {
-      setRunStatuses((prev) => ({ ...prev, [scenario.id]: { state: 'success', log: response.log } }));
+      const lastError = response.log.steps.findLast((step) => step.status === 'error')?.error;
+      setRunStatuses((prev) => ({
+        ...prev,
+        [scenario.id]: {
+          state: response.log?.status === 'success' ? 'success' : 'error',
+          log: response.log,
+          error: lastError,
+        },
+      }));
     } else {
       setRunStatuses((prev) => ({ ...prev, [scenario.id]: { state: 'error', error: response.error } }));
     }
+  }
+
+  async function handleCleanup(scenarioId: string, tabIds: number[]) {
+    if (tabIds.length === 0) return;
+    await chrome.runtime.sendMessage<RuntimeMessage, { ok: boolean; closed?: number; error?: string }>({
+      type: 'CLEANUP_TABS',
+      tabIds,
+    });
+    setRunStatuses((prev) => {
+      const status = prev[scenarioId];
+      if (!status?.log) return prev;
+      return {
+        ...prev,
+        [scenarioId]: {
+          ...status,
+          log: { ...status.log, cleanupTabIds: [] },
+        },
+      };
+    });
+    setSelectedLog((prev) => (
+      prev?.scenarioId === scenarioId ? { ...prev, cleanupTabIds: [] } : prev
+    ));
   }
 
   async function handleDelete(id: string) {
@@ -180,7 +210,7 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
-  const iconBtn = 'flex items-center justify-center w-7 h-7 rounded transition-colors';
+  const iconBtn = 'flex items-center justify-center w-7 h-7 rounded transition-colors cursor-pointer';
   const getStepCount = (scenario: Scenario) => scenario.tabs.reduce((sum, tab) => sum + tab.steps.length, 0);
 
   return (
@@ -232,6 +262,15 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
           const status = runStatuses[s.id] ?? { state: 'idle' };
           const isRunning = status.state === 'running';
           const stepCount = getStepCount(s);
+          const cleanupTabIds = status.log?.cleanupTabIds ?? [];
+          const cleanupButton = cleanupTabIds.length > 0 ? (
+            <button
+              onClick={() => handleCleanup(s.id, cleanupTabIds)}
+              className="ml-1 shrink-0 text-gray-500 hover:text-gray-300 underline underline-offset-2 cursor-pointer"
+            >
+              cleanup
+            </button>
+          ) : null;
 
           const statusBar = (
             status.state === 'running' ? (
@@ -245,10 +284,11 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
                 <span>Completed</span>
                 <button
                   onClick={() => handleShowLog(s)}
-                  className="ml-1 text-gray-500 hover:text-gray-300 underline underline-offset-2"
+                  className="ml-1 text-gray-500 hover:text-gray-300 underline underline-offset-2 cursor-pointer"
                 >
                   log
                 </button>
+                {cleanupButton}
               </div>
             ) : status.state === 'error' ? (
               <div className="flex items-center gap-1.5 text-xs text-red-400 mt-1.5 pl-0.5">
@@ -256,10 +296,11 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
                 <span className="truncate">{status.error}</span>
                 <button
                   onClick={() => handleShowLog(s)}
-                  className="ml-1 shrink-0 text-gray-500 hover:text-gray-300 underline underline-offset-2"
+                  className="ml-1 shrink-0 text-gray-500 hover:text-gray-300 underline underline-offset-2 cursor-pointer"
                 >
                   log
                 </button>
+                {cleanupButton}
               </div>
             ) : null
           );

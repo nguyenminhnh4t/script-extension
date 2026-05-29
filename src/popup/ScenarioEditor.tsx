@@ -9,11 +9,23 @@ function emptyStep(): Step {
 }
 
 function emptyTab(index: number): ScenarioTab {
-  return { id: crypto.randomUUID(), name: `Tab ${index + 1}`, startUrl: '', steps: [] };
+  return {
+    id: crypto.randomUUID(),
+    name: `Tab ${index + 1}`,
+    startUrl: '',
+    openInNewWindow: false,
+    windowWidth: 1280,
+    windowHeight: 800,
+    steps: [],
+  };
 }
 
 function newScenario(): Scenario {
-  return { id: crypto.randomUUID(), name: '', tabs: [emptyTab(0)] };
+  return {
+    id: crypto.randomUUID(),
+    name: '',
+    tabs: [emptyTab(0)],
+  };
 }
 
 interface Props {
@@ -34,14 +46,19 @@ const IconClose = () => (
     <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
   </svg>
 );
-const IconChevronUp = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="18 15 12 9 6 15" />
+const IconChevronDown = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="6 9 12 15 18 9" />
   </svg>
 );
-const IconChevronDown = () => (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="6 9 12 15 18 9" />
+const IconGrip = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+    <circle cx="9" cy="5" r="1" />
+    <circle cx="9" cy="12" r="1" />
+    <circle cx="9" cy="19" r="1" />
+    <circle cx="15" cy="5" r="1" />
+    <circle cx="15" cy="12" r="1" />
+    <circle cx="15" cy="19" r="1" />
   </svg>
 );
 const IconTrash = () => (
@@ -107,6 +124,13 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
   const [activeTabIndex, setActiveTabIndex] = useState(0);
   const [error, setError] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dragStepRef = useRef<{ tabIndex: number; stepIndex: number } | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const [draggingStep, setDraggingStep] = useState<{ tabIndex: number; stepIndex: number } | null>(null);
+  const [dragOverStep, setDragOverStep] = useState<{ tabIndex: number; stepIndex: number } | null>(null);
+  const [isTabMenuOpen, setIsTabMenuOpen] = useState(false);
+  const [openStepTypeMenu, setOpenStepTypeMenu] = useState<number | null>(null);
+  const [showWarning, setShowWarning] = useState(true);
 
   useEffect(() => {
     if (!pickedSelector) return;
@@ -180,14 +204,17 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
   }
 
   function addTab() {
-    setScenario((prev) => {
-      const tabs = [...prev.tabs, emptyTab(prev.tabs.length)];
-      setActiveTabIndex(tabs.length - 1);
-      return { ...prev, tabs };
-    });
+    const nextIndex = scenario.tabs.length;
+    setScenario((prev) => ({ ...prev, tabs: [...prev.tabs, emptyTab(prev.tabs.length)] }));
+    setActiveTabIndex(nextIndex);
+    setIsTabMenuOpen(false);
+    setOpenStepTypeMenu(null);
   }
 
   function removeTab(tabIndex: number) {
+    const tab = scenario.tabs[tabIndex];
+    if (scenario.tabs.length <= 1) return;
+    if (!confirm(`Delete ${tab?.name || `URL ${tabIndex + 1}`}?`)) return;
     setScenario((prev) => {
       if (prev.tabs.length <= 1) return prev;
       return { ...prev, tabs: prev.tabs.filter((_, i) => i !== tabIndex) };
@@ -201,6 +228,12 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
         i === tabIndex ? { ...tab, steps: [...tab.steps, emptyStep()] } : tab
       )),
     }));
+    requestAnimationFrame(() => {
+      scrollContainerRef.current?.scrollTo({
+        top: scrollContainerRef.current.scrollHeight,
+        behavior: 'smooth',
+      });
+    });
   }
 
   function removeStep(tabIndex: number, index: number) {
@@ -212,18 +245,51 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
     }));
   }
 
-  function moveStep(tabIndex: number, index: number, direction: -1 | 1) {
+  function reorderStep(tabIndex: number, fromIndex: number, toIndex: number) {
     setScenario((prev) => {
       const tab = prev.tabs[tabIndex];
       if (!tab) return prev;
       const steps = [...tab.steps];
-      const target = index + direction;
-      if (target < 0 || target >= steps.length) return prev;
-      [steps[index], steps[target]] = [steps[target], steps[index]];
+      if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0 || fromIndex >= steps.length || toIndex >= steps.length) {
+        return prev;
+      }
+      const [movedStep] = steps.splice(fromIndex, 1);
+      steps.splice(toIndex, 0, movedStep);
       const tabs = [...prev.tabs];
       tabs[tabIndex] = { ...tab, steps };
       return { ...prev, tabs };
     });
+  }
+
+  function handleStepDragStart(e: React.DragEvent, tabIndex: number, stepIndex: number) {
+    dragStepRef.current = { tabIndex, stepIndex };
+    setDraggingStep({ tabIndex, stepIndex });
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', `${tabIndex}:${stepIndex}`);
+  }
+
+  function handleStepDragOver(e: React.DragEvent, tabIndex: number, stepIndex: number) {
+    const source = dragStepRef.current;
+    if (!source || source.tabIndex !== tabIndex) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverStep({ tabIndex, stepIndex });
+  }
+
+  function handleStepDrop(e: React.DragEvent, tabIndex: number, stepIndex: number) {
+    e.preventDefault();
+    const source = dragStepRef.current;
+    dragStepRef.current = null;
+    setDraggingStep(null);
+    setDragOverStep(null);
+    if (!source || source.tabIndex !== tabIndex) return;
+    reorderStep(tabIndex, source.stepIndex, stepIndex);
+  }
+
+  function handleStepDragEnd() {
+    dragStepRef.current = null;
+    setDraggingStep(null);
+    setDragOverStep(null);
   }
 
   async function handleSave() {
@@ -239,9 +305,15 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
   }
 
   // Shared styles
-  const inputCls = 'bg-gray-900 border border-gray-700/80 rounded px-2.5 py-1.5 text-xs text-gray-100 w-full focus:outline-none focus:border-blue-500/80 placeholder:text-gray-600 transition-colors';
-  const iconBtn = 'flex items-center justify-center w-6 h-6 rounded transition-colors';
+  const inputCls = 'h-8 bg-gray-900 border border-gray-700/80 rounded px-2.5 text-xs text-gray-100 w-full focus:outline-none focus:border-blue-500/80 placeholder:text-gray-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
+  const iconBtn = 'flex items-center justify-center w-8 h-8 rounded transition-colors cursor-pointer';
+  const labelCls = 'block text-[10px] font-medium uppercase tracking-wider text-gray-500 mb-1';
+  const menuBtnCls = 'h-8 w-full rounded border border-gray-700/80 bg-gray-900 px-2.5 text-left text-xs text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800 focus:outline-none focus:border-blue-500/80 cursor-pointer';
   const activeTab = scenario.tabs[activeTabIndex] ?? scenario.tabs[0];
+
+  function formatTabOption(tab: ScenarioTab, index: number): string {
+    return `${index + 1}. ${tab.name || `URL ${index + 1}`} · ${tab.steps.length} step${tab.steps.length !== 1 ? 's' : ''}${tab.openInNewWindow ? ' · new window' : ''}`;
+  }
 
   function selectorRow(value: string, onChange: (v: string) => void, tabIndex: number, stepIndex: number) {
     return (
@@ -337,133 +409,283 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
   }
 
   return (
-    <div className="w-full min-h-screen bg-gray-950 text-gray-100 flex flex-col">
+    <div className="w-full h-screen overflow-hidden bg-gray-950 text-gray-100 flex flex-col">
 
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800/80">
-        <h1 className="text-sm font-semibold text-gray-100">
-          {initial ? 'Edit Scenario' : 'New Scenario'}
-        </h1>
-        <button
-          onClick={handleCancel}
-          className={`${iconBtn} text-gray-500 hover:text-gray-100 hover:bg-gray-800`}
-        >
-          <IconClose />
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
-
-        {/* Security notice */}
-        <div className="flex items-start gap-2 bg-amber-900/20 border border-amber-700/30 rounded-md px-3 py-2 text-xs text-amber-400/80">
-          <span className="shrink-0 mt-px"><IconWarning /></span>
-          <span>Config is saved in plaintext locally. Do not store production credentials.</span>
-        </div>
-
-        {/* Scenario meta */}
-        <div className="space-y-2">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-800/80">
+        <div className="min-w-0 flex-1">
           <input
-            className={inputCls}
+            className="h-8 w-full border-0 border-b border-transparent bg-transparent px-0 text-sm font-medium text-gray-100 placeholder:text-gray-600 transition-colors hover:border-gray-800 focus:outline-none focus:border-blue-500/80"
             placeholder="Scenario name"
             value={scenario.name}
             onChange={(e) => updateField('name', e.target.value)}
           />
         </div>
+        <button
+          onClick={handleCancel}
+          className={`${iconBtn} shrink-0 text-gray-500 hover:text-gray-100 hover:bg-gray-800`}
+        >
+          <IconClose />
+        </button>
+      </div>
 
-        {error && <p className="text-xs text-red-400">{error}</p>}
-
-        {/* Tabs */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-1 overflow-x-auto">
-            {scenario.tabs.map((tab, i) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTabIndex(i)}
-                className={`shrink-0 rounded px-2.5 py-1.5 text-xs transition-colors ${
-                  i === activeTabIndex
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-900 text-gray-400 hover:bg-gray-800 hover:text-gray-200'
-                }`}
-              >
-                {tab.name || `Tab ${i + 1}`}
-              </button>
-            ))}
+      {/* Tabs */}
+      <div className="shrink-0 border-b border-gray-800/80 bg-gray-950 px-4 py-2.5 space-y-2">
+        <div className="grid grid-cols-[1fr_auto] gap-1.5">
+          <div className="relative min-w-0">
             <button
               type="button"
-              title="Add tab"
+              onClick={() => setIsTabMenuOpen((open) => !open)}
+              className={`${menuBtnCls} flex items-center justify-between gap-2`}
+            >
+              <span className="truncate">{activeTab ? formatTabOption(activeTab, activeTabIndex) : 'Select URL'}</span>
+              <span className={`shrink-0 text-gray-500 transition-transform ${isTabMenuOpen ? 'rotate-180' : ''}`}>
+                <IconChevronDown />
+              </span>
+            </button>
+            {isTabMenuOpen && (
+              <div className="absolute left-0 right-0 top-9 z-30 max-h-56 overflow-y-auto rounded-md border border-gray-700 bg-gray-900 shadow-xl shadow-gray-950/70">
+                {scenario.tabs.map((tab, i) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveTabIndex(i);
+                      setIsTabMenuOpen(false);
+                      setOpenStepTypeMenu(null);
+                    }}
+                    className={`w-full px-2.5 py-2 text-left text-xs transition-colors cursor-pointer ${
+                      i === activeTabIndex
+                        ? 'bg-blue-950/70 text-blue-200'
+                        : 'text-gray-300 hover:bg-gray-800'
+                    }`}
+                  >
+                    <span className="block truncate">{tab.name || `URL ${i + 1}`}</span>
+                    <span className="mt-0.5 block text-[10px] text-gray-500">
+                      {i + 1} · {tab.steps.length} step{tab.steps.length !== 1 ? 's' : ''}{tab.openInNewWindow ? ' · new window' : ''}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              title="Add URL"
               onClick={addTab}
-              className={`${iconBtn} shrink-0 text-blue-400 hover:text-blue-300 hover:bg-blue-950 border border-gray-800`}
+              className={`${iconBtn} border border-blue-900/60 bg-blue-950/40 text-blue-300 hover:bg-blue-950 hover:text-blue-200`}
             >
               <IconPlus />
             </button>
+            <button
+              type="button"
+              title="Delete current URL"
+              onClick={() => removeTab(activeTabIndex)}
+              disabled={scenario.tabs.length <= 1}
+              className={`${iconBtn} border border-gray-800 text-gray-600 hover:text-red-400 hover:bg-red-950/30 disabled:opacity-25 disabled:cursor-not-allowed`}
+            >
+              <IconTrash />
+            </button>
           </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1 pb-0.5">
+          {scenario.tabs.map((tab, i) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => {
+                setActiveTabIndex(i);
+                setOpenStepTypeMenu(null);
+              }}
+              title={tab.startUrl || tab.name || `URL ${i + 1}`}
+              className={`h-1.5 rounded-full transition-colors cursor-pointer ${
+                i === activeTabIndex
+                  ? 'w-8 bg-blue-500'
+                  : 'w-4 bg-gray-700 hover:bg-gray-500'
+              }`}
+            />
+          ))}
+        </div>
+      </div>
+
+      <div ref={scrollContainerRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-3 space-y-3">
+
+        {/* Security notice */}
+        {showWarning && (
+          <div className="flex items-start gap-2 bg-amber-900/20 border border-amber-700/30 rounded-md px-3 py-2 text-xs text-amber-400/80">
+            <span className="shrink-0 mt-px"><IconWarning /></span>
+            <span className="min-w-0 flex-1">Config is saved in plaintext locally. Do not store production credentials.</span>
+            <button
+              type="button"
+              title="Dismiss"
+              onClick={() => setShowWarning(false)}
+              className="shrink-0 text-amber-500/70 hover:text-amber-300 transition-colors cursor-pointer"
+            >
+              <IconClose />
+            </button>
+          </div>
+        )}
+
+        {error && <p className="text-xs text-red-400">{error}</p>}
 
           {activeTab && (
-            <div className="space-y-2">
-              <div className="grid grid-cols-[1fr_auto] gap-1.5">
-                <input
-                  className={inputCls}
-                  placeholder="Tab name"
-                  value={activeTab.name}
-                  onChange={(e) => updateTabField(activeTabIndex, 'name', e.target.value)}
-                />
-                <button
-                  type="button"
-                  title="Delete tab"
-                  onClick={() => removeTab(activeTabIndex)}
-                  disabled={scenario.tabs.length <= 1}
-                  className={`${iconBtn} text-gray-600 hover:text-red-400 disabled:opacity-20`}
-                >
-                  <IconTrash />
-                </button>
+            <div className="overflow-hidden rounded-md border border-gray-800/80 bg-gray-900/40">
+              <div className="flex items-center justify-between border-b border-gray-800/70 px-2.5 py-2">
+                <div>
+                  <p className="text-xs font-medium text-gray-300">Tab settings</p>
+                  <p className="text-[10px] text-gray-600">URL {activeTabIndex + 1}</p>
+                </div>
               </div>
-              <input
-                className={inputCls}
-                placeholder="Tab start URL (blank uses active tab for first tab)"
-                value={activeTab.startUrl}
-                onChange={(e) => updateTabField(activeTabIndex, 'startUrl', e.target.value)}
-              />
+            <div className="space-y-2.5 p-2.5">
+                <label className="block">
+                  <span className={labelCls}>Tab name</span>
+                  <input
+                    className={inputCls}
+                    placeholder="Tab name"
+                    value={activeTab.name}
+                    onChange={(e) => updateTabField(activeTabIndex, 'name', e.target.value)}
+                  />
+                </label>
+                <label className="block">
+                  <span className={labelCls}>Start URL</span>
+                  <input
+                    className={inputCls}
+                    placeholder="Blank uses active tab for first URL"
+                    value={activeTab.startUrl}
+                    onChange={(e) => updateTabField(activeTabIndex, 'startUrl', e.target.value)}
+                  />
+                </label>
+                <div className="rounded-md bg-gray-950/30 p-2.5">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-gray-300">Window settings</p>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={activeTab.openInNewWindow}
+                      onClick={() => updateTabField(activeTabIndex, 'openInNewWindow', !activeTab.openInNewWindow)}
+                      className={`flex h-6 shrink-0 items-center gap-1.5 rounded px-1.5 text-xs transition-colors cursor-pointer ${
+                        activeTab.openInNewWindow
+                          ? 'text-blue-300'
+                          : 'text-gray-400 hover:text-gray-200'
+                      }`}
+                    >
+                      <span className={`relative inline-flex h-4 w-7 shrink-0 items-center rounded-full p-0.5 transition-colors ${
+                        activeTab.openInNewWindow ? 'bg-blue-600' : 'bg-gray-700'
+                      }`}>
+                        <span className={`h-3 w-3 rounded-full bg-white shadow-sm transition-transform ${
+                          activeTab.openInNewWindow ? 'translate-x-3' : 'translate-x-0'
+                        }`} />
+                      </span>
+                      <span>Window</span>
+                    </button>
+                  </div>
+                  {activeTab.openInNewWindow && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="block min-w-0">
+                        <span className={labelCls}>Width</span>
+                        <input
+                          className={`${inputCls} min-w-0`}
+                          type="number"
+                          min={320}
+                          placeholder="Width"
+                          value={activeTab.windowWidth}
+                          onChange={(e) => updateTabField(activeTabIndex, 'windowWidth', Number(e.target.value))}
+                        />
+                      </label>
+                      <label className="block min-w-0">
+                        <span className={labelCls}>Height</span>
+                        <input
+                          className={`${inputCls} min-w-0`}
+                          type="number"
+                          min={240}
+                          placeholder="Height"
+                          value={activeTab.windowHeight}
+                          onChange={(e) => updateTabField(activeTabIndex, 'windowHeight', Number(e.target.value))}
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          )}
-        </div>
+        )}
 
         {/* Steps */}
         {activeTab && (
         <div className="space-y-1.5">
           <p className="text-xs text-gray-500 font-medium uppercase tracking-wider px-0.5">Steps</p>
 
-          {activeTab.steps.map((step, i) => (
-            <div key={i} className="bg-gray-900/70 border border-gray-800/80 rounded-md overflow-hidden">
+          {activeTab.steps.map((step, i) => {
+            const isDragging = draggingStep?.tabIndex === activeTabIndex && draggingStep.stepIndex === i;
+            const isDragTarget = dragOverStep?.tabIndex === activeTabIndex && dragOverStep.stepIndex === i && !isDragging;
+
+            return (
+              <div
+                key={i}
+                onDragOver={(e) => handleStepDragOver(e, activeTabIndex, i)}
+                onDrop={(e) => handleStepDrop(e, activeTabIndex, i)}
+                className={`bg-gray-900/70 border rounded-md overflow-visible transition-all duration-150 ${
+                  isDragging
+                    ? 'border-blue-400 bg-blue-950/20 opacity-55 scale-[0.985] shadow-lg shadow-blue-950/40'
+                    : isDragTarget
+                      ? 'border-blue-500 bg-blue-950/35 translate-y-0.5 shadow-md shadow-blue-950/30'
+                      : 'border-gray-800/80'
+                }`}
+              >
 
               {/* Step header row */}
               <div className="flex items-center gap-1.5 px-2 py-1.5 border-b border-gray-800/60">
-                <span className="text-xs w-4 text-center shrink-0">{STEP_ICONS[step.type]}</span>
-                <select
-                  className="flex-1 bg-transparent border-0 text-xs text-gray-300 focus:outline-none cursor-pointer"
-                  value={step.type}
-                  onChange={(e) => changeStepType(activeTabIndex, i, e.target.value as StepType)}
+                <button
+                  type="button"
+                  title="Drag to reorder"
+                  draggable
+                  onDragStart={(e) => handleStepDragStart(e, activeTabIndex, i)}
+                  onDragEnd={handleStepDragEnd}
+                  className={`${iconBtn} cursor-grab active:cursor-grabbing ${
+                    isDragging ? 'text-blue-300 bg-blue-950/70' : 'text-gray-600 hover:text-gray-300'
+                  }`}
                 >
-                  {STEP_TYPES.map((t) => (
-                    <option key={t} value={t} className="bg-gray-800">{t}</option>
-                  ))}
-                </select>
+                  <IconGrip />
+                </button>
+                <span className="text-xs w-4 text-center shrink-0">{STEP_ICONS[step.type]}</span>
+                <div className="relative flex-1 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setOpenStepTypeMenu((openIndex) => openIndex === i ? null : i)}
+                    className="flex h-8 w-full items-center justify-between gap-2 rounded border border-transparent bg-gray-950/30 px-2 text-left text-xs text-gray-300 transition-colors hover:border-gray-700 hover:bg-gray-800/70 cursor-pointer"
+                  >
+                    <span className="truncate">{step.type}</span>
+                    <span className={`shrink-0 text-gray-500 transition-transform ${openStepTypeMenu === i ? 'rotate-180' : ''}`}>
+                      <IconChevronDown />
+                    </span>
+                  </button>
+                  {openStepTypeMenu === i && (
+                    <div className="absolute left-0 right-0 top-9 z-50 overflow-hidden rounded-md border border-gray-700 bg-gray-900 shadow-xl shadow-gray-950/60">
+                      {STEP_TYPES.map((t) => (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => {
+                            changeStepType(activeTabIndex, i, t);
+                            setOpenStepTypeMenu(null);
+                          }}
+                          className={`flex w-full items-center gap-2 px-2.5 py-2 text-left text-xs transition-colors cursor-pointer ${
+                            step.type === t
+                              ? 'bg-blue-950/70 text-blue-200'
+                              : 'text-gray-300 hover:bg-gray-800'
+                          }`}
+                        >
+                          <span className="w-4 text-center">{STEP_ICONS[t]}</span>
+                          <span>{t}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
                 <div className="flex items-center gap-0.5 ml-auto">
-                  <button
-                    onClick={() => moveStep(activeTabIndex, i, -1)}
-                    disabled={i === 0}
-                    className={`${iconBtn} text-gray-600 hover:text-gray-300 disabled:opacity-20`}
-                  >
-                    <IconChevronUp />
-                  </button>
-                  <button
-                    onClick={() => moveStep(activeTabIndex, i, 1)}
-                    disabled={i === activeTab.steps.length - 1}
-                    className={`${iconBtn} text-gray-600 hover:text-gray-300 disabled:opacity-20`}
-                  >
-                    <IconChevronDown />
-                  </button>
                   <button
                     onClick={() => removeStep(activeTabIndex, i)}
                     className={`${iconBtn} text-gray-600 hover:text-red-400`}
@@ -478,11 +700,12 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
                 {stepFields(step, activeTabIndex, i)}
               </div>
             </div>
-          ))}
+          );
+          })}
 
           <button
             onClick={() => addStep(activeTabIndex)}
-            className="w-full flex items-center justify-center gap-1.5 text-xs border border-dashed border-gray-700/80 hover:border-gray-500 text-gray-600 hover:text-gray-300 py-2 rounded-md transition-colors"
+          className="w-full flex items-center justify-center gap-1.5 text-xs border border-dashed border-gray-700/80 hover:border-gray-500 text-gray-600 hover:text-gray-300 py-2 rounded-md transition-colors cursor-pointer"
           >
             <IconPlus />
             Add step
@@ -492,16 +715,16 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
       </div>
 
       {/* Footer */}
-      <div className="px-4 py-3 border-t border-gray-800/80 flex items-center justify-end gap-2">
+      <div className="shrink-0 px-4 py-3 border-t border-gray-800/80 flex items-center justify-end gap-2">
         <button
           onClick={handleCancel}
-          className="text-xs text-gray-500 hover:text-gray-200 px-3 py-1.5 transition-colors"
+          className="text-xs text-gray-500 hover:text-gray-200 px-3 py-1.5 transition-colors cursor-pointer"
         >
           Cancel
         </button>
         <button
           onClick={handleSave}
-          className="flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded text-white transition-colors"
+          className="flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded text-white transition-colors cursor-pointer"
         >
           <IconSave />
           Save

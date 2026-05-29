@@ -26,23 +26,46 @@ function waitForTabLoad(tabId: number): Promise<void> {
   });
 }
 
-async function createOrResolveTab(startUrl: string, useActiveTab: boolean): Promise<number> {
+interface ResolvedTab {
+  id: number;
+  created: boolean;
+}
+
+function normalizeRunUrl(startUrl: string): string {
+  return startUrl || 'about:blank';
+}
+
+async function createOrResolveTab(startUrl: string, useActiveTab: boolean, windowId?: number): Promise<ResolvedTab> {
   if (startUrl) {
-    const tab = await chrome.tabs.create({ url: startUrl });
+    const tab = await chrome.tabs.create({ url: startUrl, ...(windowId != null ? { windowId } : {}) });
     const tabId = tab.id;
     if (!tabId) throw new Error('Created tab has no id');
     await waitForTabLoad(tabId);
-    return tabId;
+    return { id: tabId, created: true };
   }
 
   if (useActiveTab) {
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (activeTab?.id) return activeTab.id;
+    if (activeTab?.id) return { id: activeTab.id, created: false };
   }
 
-  const tab = await chrome.tabs.create({ url: 'about:blank' });
+  const tab = await chrome.tabs.create({ url: 'about:blank', ...(windowId != null ? { windowId } : {}) });
   if (!tab.id) throw new Error('Created tab has no id');
-  return tab.id;
+  return { id: tab.id, created: true };
+}
+
+async function createRunWindow(startUrl: string, width: number, height: number): Promise<ResolvedTab & { windowId: number }> {
+  const win = await chrome.windows.create({
+    url: normalizeRunUrl(startUrl),
+    width,
+    height,
+    focused: true,
+    type: 'normal',
+  });
+  const tabId = win.tabs?.[0]?.id;
+  if (!win.id || !tabId) throw new Error('Created window has no tab');
+  if (startUrl) await waitForTabLoad(tabId);
+  return { id: tabId, windowId: win.id, created: true };
 }
 
 export async function runScenario(
@@ -55,12 +78,34 @@ export async function runScenario(
   const startedAt = new Date().toISOString();
   const stepLogs: StepLog[] = [];
   const tabIds: number[] = [];
+  const cleanupTabIds: number[] = [];
   const closedTabs = new Set<number>();
   const totalSteps = scenario.tabs.reduce((sum, tab) => sum + tab.steps.length, 0);
   let globalStepIndex = 0;
 
   for (let i = 0; i < scenario.tabs.length; i++) {
-    tabIds[i] = await createOrResolveTab(scenario.tabs[i].startUrl, i === 0);
+    const scenarioTab = scenario.tabs[i];
+    if (scenarioTab.openInNewWindow) {
+      const resolvedTab = await createRunWindow(scenarioTab.startUrl, scenarioTab.windowWidth, scenarioTab.windowHeight);
+      tabIds[i] = resolvedTab.id;
+      cleanupTabIds.push(resolvedTab.id);
+    } else {
+      const resolvedTab = await createOrResolveTab(scenarioTab.startUrl, i === 0);
+      tabIds[i] = resolvedTab.id;
+      if (resolvedTab.created) cleanupTabIds.push(resolvedTab.id);
+    }
+  }
+
+  function buildLog(status: 'success' | 'error'): RunLog {
+    return {
+      scenarioId: scenario.id,
+      scenarioName: scenario.name,
+      startedAt,
+      endedAt: new Date().toISOString(),
+      status,
+      steps: stepLogs,
+      cleanupTabIds: cleanupTabIds.filter((tabId) => !closedTabs.has(tabId)),
+    };
   }
 
   chrome.tabs.onRemoved.addListener((removedId) => {
@@ -86,14 +131,7 @@ export async function runScenario(
         };
         stepLogs.push(stepLog);
         onProgress(globalStepIndex, stepLog);
-        const log: RunLog = {
-          scenarioId: scenario.id,
-          scenarioName: scenario.name,
-          startedAt,
-          endedAt: new Date().toISOString(),
-          status: 'error',
-          steps: stepLogs,
-        };
+        const log = buildLog('error');
         await saveRunLog(log);
         return log;
       }
@@ -139,14 +177,7 @@ export async function runScenario(
         };
         stepLogs.push(stepLog);
         onProgress(globalStepIndex, stepLog);
-        const log: RunLog = {
-          scenarioId: scenario.id,
-          scenarioName: scenario.name,
-          startedAt,
-          endedAt: new Date().toISOString(),
-          status: 'error',
-          steps: stepLogs,
-        };
+        const log = buildLog('error');
         await saveRunLog(log);
         return log;
       }
@@ -156,26 +187,12 @@ export async function runScenario(
   }
 
   if (totalSteps === 0) {
-    const log: RunLog = {
-      scenarioId: scenario.id,
-      scenarioName: scenario.name,
-      startedAt,
-      endedAt: new Date().toISOString(),
-      status: 'success',
-      steps: stepLogs,
-    };
+    const log = buildLog('success');
     await saveRunLog(log);
     return log;
   }
 
-  const log: RunLog = {
-    scenarioId: scenario.id,
-    scenarioName: scenario.name,
-    startedAt,
-    endedAt: new Date().toISOString(),
-    status: 'success',
-    steps: stepLogs,
-  };
+  const log = buildLog('success');
   await saveRunLog(log);
   return log;
 }
