@@ -52,6 +52,8 @@ export function normalizeScenario(value: unknown): Scenario | null {
 
   const legacyWindowConfig = {
     openInNewWindow: booleanValue(value.openInNewWindow),
+    windowScreenX: Math.round(numberValue(value.windowScreenX, 0)),
+    windowScreenY: Math.round(numberValue(value.windowScreenY, 0)),
     windowWidth: Math.max(320, Math.round(numberValue(value.windowWidth, 1280))),
     windowHeight: Math.max(240, Math.round(numberValue(value.windowHeight, 800))),
   };
@@ -73,6 +75,8 @@ export function normalizeScenario(value: unknown): Scenario | null {
       name: 'Tab 1',
       startUrl: '',
       openInNewWindow: legacyWindowConfig.openInNewWindow,
+      windowScreenX: legacyWindowConfig.windowScreenX,
+      windowScreenY: legacyWindowConfig.windowScreenY,
       windowWidth: legacyWindowConfig.windowWidth,
       windowHeight: legacyWindowConfig.windowHeight,
       steps: [],
@@ -82,7 +86,7 @@ export function normalizeScenario(value: unknown): Scenario | null {
 
 function normalizeScenarioTab(
   value: unknown,
-  fallbackWindowConfig = { openInNewWindow: false, windowWidth: 1280, windowHeight: 800 }
+  fallbackWindowConfig = { openInNewWindow: false, windowScreenX: 0, windowScreenY: 0, windowWidth: 1280, windowHeight: 800 }
 ): ScenarioTab | null {
   if (!isRecord(value)) return null;
   const rawSteps = Array.isArray(value.steps) ? value.steps : [];
@@ -91,6 +95,9 @@ function normalizeScenarioTab(
     name: stringValue(value.name, 'Tab'),
     startUrl: stringValue(value.startUrl),
     openInNewWindow: booleanValue(value.openInNewWindow, fallbackWindowConfig.openInNewWindow),
+    ...(typeof value.windowTargetTabId === 'string' && value.windowTargetTabId ? { windowTargetTabId: value.windowTargetTabId } : {}),
+    windowScreenX: Math.round(numberValue(value.windowScreenX, fallbackWindowConfig.windowScreenX)),
+    windowScreenY: Math.round(numberValue(value.windowScreenY, fallbackWindowConfig.windowScreenY)),
     windowWidth: Math.max(320, Math.round(numberValue(value.windowWidth, fallbackWindowConfig.windowWidth))),
     windowHeight: Math.max(240, Math.round(numberValue(value.windowHeight, fallbackWindowConfig.windowHeight))),
     steps: rawSteps.map(normalizeStep).filter((step): step is Step => step !== null),

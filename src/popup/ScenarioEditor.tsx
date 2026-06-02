@@ -14,6 +14,9 @@ function emptyTab(index: number): ScenarioTab {
     name: `Tab ${index + 1}`,
     startUrl: '',
     openInNewWindow: false,
+    windowTargetTabId: undefined,
+    windowScreenX: 0,
+    windowScreenY: 0,
     windowWidth: 1280,
     windowHeight: 800,
     steps: [],
@@ -129,6 +132,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
   const [draggingStep, setDraggingStep] = useState<{ tabIndex: number; stepIndex: number } | null>(null);
   const [dragOverStep, setDragOverStep] = useState<{ tabIndex: number; stepIndex: number } | null>(null);
   const [isTabMenuOpen, setIsTabMenuOpen] = useState(false);
+  const [isWindowTargetMenuOpen, setIsWindowTargetMenuOpen] = useState(false);
   const [openStepTypeMenu, setOpenStepTypeMenu] = useState<number | null>(null);
   const [showWarning, setShowWarning] = useState(true);
 
@@ -217,8 +221,42 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
     if (!confirm(`Delete ${tab?.name || `URL ${tabIndex + 1}`}?`)) return;
     setScenario((prev) => {
       if (prev.tabs.length <= 1) return prev;
-      return { ...prev, tabs: prev.tabs.filter((_, i) => i !== tabIndex) };
+      const removedTabId = prev.tabs[tabIndex]?.id;
+      return {
+        ...prev,
+        tabs: prev.tabs
+          .filter((_, i) => i !== tabIndex)
+          .map((item) => (
+            item.windowTargetTabId === removedTabId ? { ...item, windowTargetTabId: undefined } : item
+          )),
+      };
     });
+    setIsWindowTargetMenuOpen(false);
+  }
+
+  function toggleTabWindow(tabIndex: number) {
+    setScenario((prev) => {
+      const targetTab = prev.tabs[tabIndex];
+      if (!targetTab) return prev;
+      const enabled = !targetTab.openInNewWindow;
+      return {
+        ...prev,
+        tabs: prev.tabs.map((tab, i) => {
+          if (i === tabIndex) {
+            return {
+              ...tab,
+              openInNewWindow: enabled,
+              windowTargetTabId: enabled ? tab.windowTargetTabId : undefined,
+            };
+          }
+          if (!enabled && tab.windowTargetTabId === targetTab.id) {
+            return { ...tab, windowTargetTabId: undefined };
+          }
+          return tab;
+        }),
+      };
+    });
+    setIsWindowTargetMenuOpen(false);
   }
 
   function addStep(tabIndex: number) {
@@ -310,9 +348,20 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
   const labelCls = 'block text-[10px] font-medium uppercase tracking-wider text-gray-500 mb-1';
   const menuBtnCls = 'h-8 w-full rounded border border-gray-700/80 bg-gray-900 px-2.5 text-left text-xs text-gray-100 transition-colors hover:border-gray-600 hover:bg-gray-800 focus:outline-none focus:border-blue-500/80 cursor-pointer';
   const activeTab = scenario.tabs[activeTabIndex] ?? scenario.tabs[0];
+  const shareableWindowTabs = scenario.tabs
+    .slice(0, activeTabIndex)
+    .filter((tab) => tab.openInNewWindow);
+  const activeUsesSharedWindow = Boolean(
+    activeTab?.windowTargetTabId && shareableWindowTabs.some((tab) => tab.id === activeTab.windowTargetTabId)
+  );
 
   function formatTabOption(tab: ScenarioTab, index: number): string {
     return `${index + 1}. ${tab.name || `URL ${index + 1}`} · ${tab.steps.length} step${tab.steps.length !== 1 ? 's' : ''}${tab.openInNewWindow ? ' · new window' : ''}`;
+  }
+
+  function getWindowTargetLabel(tab: ScenarioTab): string {
+    const target = shareableWindowTabs.find((item) => item.id === tab.windowTargetTabId);
+    return target ? `With ${target.name || 'tab'}` : 'Own window';
   }
 
   function selectorRow(value: string, onChange: (v: string) => void, tabIndex: number, stepIndex: number) {
@@ -452,6 +501,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
                     onClick={() => {
                       setActiveTabIndex(i);
                       setIsTabMenuOpen(false);
+                      setIsWindowTargetMenuOpen(false);
                       setOpenStepTypeMenu(null);
                     }}
                     className={`w-full px-2.5 py-2 text-left text-xs transition-colors cursor-pointer ${
@@ -497,6 +547,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
               type="button"
               onClick={() => {
                 setActiveTabIndex(i);
+                setIsWindowTargetMenuOpen(false);
                 setOpenStepTypeMenu(null);
               }}
               title={tab.startUrl || tab.name || `URL ${i + 1}`}
@@ -564,7 +615,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
                       type="button"
                       role="switch"
                       aria-checked={activeTab.openInNewWindow}
-                      onClick={() => updateTabField(activeTabIndex, 'openInNewWindow', !activeTab.openInNewWindow)}
+                      onClick={() => toggleTabWindow(activeTabIndex)}
                       className={`flex h-6 shrink-0 items-center gap-1.5 rounded px-1.5 text-xs transition-colors cursor-pointer ${
                         activeTab.openInNewWindow
                           ? 'text-blue-300'
@@ -582,29 +633,104 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
                     </button>
                   </div>
                   {activeTab.openInNewWindow && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <label className="block min-w-0">
-                        <span className={labelCls}>Width</span>
-                        <input
-                          className={`${inputCls} min-w-0`}
-                          type="number"
-                          min={320}
-                          placeholder="Width"
-                          value={activeTab.windowWidth}
-                          onChange={(e) => updateTabField(activeTabIndex, 'windowWidth', Number(e.target.value))}
-                        />
-                      </label>
-                      <label className="block min-w-0">
-                        <span className={labelCls}>Height</span>
-                        <input
-                          className={`${inputCls} min-w-0`}
-                          type="number"
-                          min={240}
-                          placeholder="Height"
-                          value={activeTab.windowHeight}
-                          onChange={(e) => updateTabField(activeTabIndex, 'windowHeight', Number(e.target.value))}
-                        />
-                      </label>
+                    <div className="space-y-2">
+                      {shareableWindowTabs.length > 0 && (
+                        <div className="relative">
+                          <span className={labelCls}>Share</span>
+                          <button
+                            type="button"
+                            onClick={() => setIsWindowTargetMenuOpen((open) => !open)}
+                            className={`${menuBtnCls} flex items-center justify-between gap-2`}
+                          >
+                            <span className="truncate">{getWindowTargetLabel(activeTab)}</span>
+                            <span className={`shrink-0 text-gray-500 transition-transform ${isWindowTargetMenuOpen ? 'rotate-180' : ''}`}>
+                              <IconChevronDown />
+                            </span>
+                          </button>
+                          {isWindowTargetMenuOpen && (
+                            <div className="absolute left-0 right-0 top-14 z-40 max-h-44 overflow-y-auto rounded-md border border-gray-700 bg-gray-900 shadow-xl shadow-gray-950/70">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  updateTabField(activeTabIndex, 'windowTargetTabId', undefined);
+                                  setIsWindowTargetMenuOpen(false);
+                                }}
+                                className={`w-full px-2.5 py-2 text-left text-xs transition-colors cursor-pointer ${
+                                  !activeUsesSharedWindow
+                                    ? 'bg-blue-950/70 text-blue-200'
+                                    : 'text-gray-300 hover:bg-gray-800'
+                                }`}
+                              >
+                                Own window
+                              </button>
+                              {shareableWindowTabs.map((tab) => (
+                                <button
+                                  key={tab.id}
+                                  type="button"
+                                  onClick={() => {
+                                    updateTabField(activeTabIndex, 'windowTargetTabId', tab.id);
+                                    setIsWindowTargetMenuOpen(false);
+                                  }}
+                                  className={`w-full px-2.5 py-2 text-left text-xs transition-colors cursor-pointer ${
+                                    activeTab.windowTargetTabId === tab.id
+                                      ? 'bg-blue-950/70 text-blue-200'
+                                      : 'text-gray-300 hover:bg-gray-800'
+                                  }`}
+                                >
+                                  <span className="block truncate">{tab.name || 'Tab'}</span>
+                                  <span className="mt-0.5 block text-[10px] text-gray-500">Use the same window</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {!activeUsesSharedWindow && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="block min-w-0">
+                            <span className={labelCls}>Screen X</span>
+                            <input
+                              className={`${inputCls} min-w-0`}
+                              type="number"
+                              placeholder="X"
+                              value={activeTab.windowScreenX}
+                              onChange={(e) => updateTabField(activeTabIndex, 'windowScreenX', Number(e.target.value))}
+                            />
+                          </label>
+                          <label className="block min-w-0">
+                            <span className={labelCls}>Screen Y</span>
+                            <input
+                              className={`${inputCls} min-w-0`}
+                              type="number"
+                              placeholder="Y"
+                              value={activeTab.windowScreenY}
+                              onChange={(e) => updateTabField(activeTabIndex, 'windowScreenY', Number(e.target.value))}
+                            />
+                          </label>
+                          <label className="block min-w-0">
+                            <span className={labelCls}>Width</span>
+                            <input
+                              className={`${inputCls} min-w-0`}
+                              type="number"
+                              min={320}
+                              placeholder="Width"
+                              value={activeTab.windowWidth}
+                              onChange={(e) => updateTabField(activeTabIndex, 'windowWidth', Number(e.target.value))}
+                            />
+                          </label>
+                          <label className="block min-w-0">
+                            <span className={labelCls}>Height</span>
+                            <input
+                              className={`${inputCls} min-w-0`}
+                              type="number"
+                              min={240}
+                              placeholder="Height"
+                              value={activeTab.windowHeight}
+                              onChange={(e) => updateTabField(activeTabIndex, 'windowHeight', Number(e.target.value))}
+                            />
+                          </label>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

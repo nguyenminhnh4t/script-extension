@@ -60,6 +60,9 @@ export interface ScenarioTab {
   name: string;
   startUrl: string;
   openInNewWindow: boolean;
+  windowTargetTabId?: string;
+  windowScreenX: number;
+  windowScreenY: number;
   windowWidth: number;
   windowHeight: number;
   steps: Step[];
@@ -71,6 +74,8 @@ export interface Scenario {
   tabs: ScenarioTab[];
   /** Legacy window fields, normalized into tabs when loaded. */
   openInNewWindow?: boolean;
+  windowScreenX?: number;
+  windowScreenY?: number;
   windowWidth?: number;
   windowHeight?: number;
   /** Legacy single-tab fields, normalized into tabs when loaded. */

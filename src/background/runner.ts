@@ -54,9 +54,17 @@ async function createOrResolveTab(startUrl: string, useActiveTab: boolean, windo
   return { id: tab.id, created: true };
 }
 
-async function createRunWindow(startUrl: string, width: number, height: number): Promise<ResolvedTab & { windowId: number }> {
+async function createRunWindow(
+  startUrl: string,
+  width: number,
+  height: number,
+  screenX: number,
+  screenY: number
+): Promise<ResolvedTab & { windowId: number }> {
   const win = await chrome.windows.create({
     url: normalizeRunUrl(startUrl),
+    left: screenX,
+    top: screenY,
     width,
     height,
     focused: true,
@@ -80,15 +88,33 @@ export async function runScenario(
   const tabIds: number[] = [];
   const cleanupTabIds: number[] = [];
   const closedTabs = new Set<number>();
+  const windowIdsByTabId = new Map<string, number>();
   const totalSteps = scenario.tabs.reduce((sum, tab) => sum + tab.steps.length, 0);
   let globalStepIndex = 0;
 
   for (let i = 0; i < scenario.tabs.length; i++) {
     const scenarioTab = scenario.tabs[i];
     if (scenarioTab.openInNewWindow) {
-      const resolvedTab = await createRunWindow(scenarioTab.startUrl, scenarioTab.windowWidth, scenarioTab.windowHeight);
-      tabIds[i] = resolvedTab.id;
-      cleanupTabIds.push(resolvedTab.id);
+      const targetWindowId = scenarioTab.windowTargetTabId
+        ? windowIdsByTabId.get(scenarioTab.windowTargetTabId)
+        : undefined;
+      if (targetWindowId != null) {
+        const resolvedTab = await createOrResolveTab(scenarioTab.startUrl, false, targetWindowId);
+        tabIds[i] = resolvedTab.id;
+        windowIdsByTabId.set(scenarioTab.id, targetWindowId);
+        if (resolvedTab.created) cleanupTabIds.push(resolvedTab.id);
+      } else {
+        const resolvedTab = await createRunWindow(
+          scenarioTab.startUrl,
+          scenarioTab.windowWidth,
+          scenarioTab.windowHeight,
+          scenarioTab.windowScreenX,
+          scenarioTab.windowScreenY
+        );
+        tabIds[i] = resolvedTab.id;
+        windowIdsByTabId.set(scenarioTab.id, resolvedTab.windowId);
+        cleanupTabIds.push(resolvedTab.id);
+      }
     } else {
       const resolvedTab = await createOrResolveTab(scenarioTab.startUrl, i === 0);
       tabIds[i] = resolvedTab.id;
