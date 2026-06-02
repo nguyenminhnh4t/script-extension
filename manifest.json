@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Simple Automation Runner",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Config-driven browser task runner",
   "permissions": ["storage", "tabs", "scripting", "activeTab", "sidePanel"],
   "host_permissions": ["<all_urls>"],
