@@ -1,15 +1,28 @@
 {
   "manifest_version": 3,
   "name": "Simple Automation Runner",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Config-driven browser task runner",
   "permissions": ["storage", "tabs", "scripting", "activeTab", "sidePanel"],
   "host_permissions": ["<all_urls>"],
+  "icons": {
+    "16": "simple_automation_logo_icon.png",
+    "32": "simple_automation_logo_icon.png",
+    "48": "simple_automation_logo_icon.png",
+    "128": "simple_automation_logo_icon.png"
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
-  "action": {},
+  "action": {
+    "default_icon": {
+      "16": "simple_automation_logo_icon.png",
+      "32": "simple_automation_logo_icon.png",
+      "48": "simple_automation_logo_icon.png",
+      "128": "simple_automation_logo_icon.png"
+    }
+  },
   "side_panel": {
     "default_path": "popup.html"
   },
