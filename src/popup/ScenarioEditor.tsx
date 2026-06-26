@@ -582,7 +582,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
         {error && <p className="text-xs text-red-400">{error}</p>}
 
           {activeTab && (
-            <div className="overflow-hidden rounded-md border border-gray-800/80 bg-gray-900/40">
+            <div className="overflow-visible rounded-md border border-gray-800/80 bg-gray-900/40">
               <div className="flex items-center justify-between border-b border-gray-800/70 px-2.5 py-2">
                 <div>
                   <p className="text-xs font-medium text-gray-300">Tab settings</p>

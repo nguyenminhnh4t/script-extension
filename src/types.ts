@@ -104,11 +104,20 @@ export interface RunLog {
   cleanupTabIds: number[];
 }
 
+export type RunState = 'idle' | 'running' | 'success' | 'error';
+
+export interface RunStatus {
+  state: RunState;
+  currentStep?: number;
+  log?: RunLog;
+  error?: string;
+}
+
 export type RuntimeMessage =
   | { type: 'RUN_SCENARIO'; scenario: Scenario }
   | { type: 'RUN_STEP'; step: Step }
   | { type: 'RUN_COMPLETE'; log: RunLog }
-  | { type: 'RUN_PROGRESS'; stepIndex: number; stepLog: StepLog }
+  | { type: 'RUN_PROGRESS'; scenarioId?: string; stepIndex: number; stepLog: StepLog }
   | { type: 'CLEANUP_TABS'; tabIds: number[] }
   | { type: 'START_PICK_MODE' }
   | { type: 'PICK_COMPLETE'; selector: string }

@@ -1,6 +1,6 @@
 import type { RuntimeMessage, StepLog } from '../types';
 import { runScenario } from './runner';
-import { getPickTarget, savePickTarget } from '../storage';
+import { getPickTarget, savePickTarget, saveRunStatus } from '../storage';
 
 // Open side panel when user clicks the extension icon
 chrome.action.onClicked.addListener((tab) => {
@@ -12,16 +12,30 @@ chrome.action.onClicked.addListener((tab) => {
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
   if (message.type === 'RUN_SCENARIO') {
     const scenario = message.scenario;
+    saveRunStatus(scenario.id, { state: 'running', currentStep: 0 }).catch(() => {});
 
     runScenario(scenario, (stepIndex: number, stepLog: StepLog) => {
+      saveRunStatus(scenario.id, { state: 'running', currentStep: stepIndex }).catch(() => {});
       chrome.runtime.sendMessage<RuntimeMessage>({
         type: 'RUN_PROGRESS',
+        scenarioId: scenario.id,
         stepIndex,
         stepLog,
       }).catch(() => {});
     })
-      .then((log) => sendResponse({ ok: true, log }))
-      .catch((err: Error) => sendResponse({ ok: false, error: err.message }));
+      .then((log) => {
+        const lastError = log.steps.findLast((step) => step.status === 'error')?.error;
+        saveRunStatus(scenario.id, {
+          state: log.status === 'success' ? 'success' : 'error',
+          log,
+          ...(lastError ? { error: lastError } : {}),
+        }).catch(() => {});
+        sendResponse({ ok: true, log });
+      })
+      .catch((err: Error) => {
+        saveRunStatus(scenario.id, { state: 'error', error: err.message }).catch(() => {});
+        sendResponse({ ok: false, error: err.message });
+      });
 
     return true;
   }

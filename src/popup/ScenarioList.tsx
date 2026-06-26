@@ -1,19 +1,19 @@
 import { useEffect, useState } from 'react';
-import type { Scenario, RunLog, StepLog, RuntimeMessage } from '../types';
-import { getScenarios, deleteScenario, getLastRunLog, saveScenario, normalizeScenario } from '../storage';
+import type { Scenario, RunLog, RunStatus, StepLog, RuntimeMessage } from '../types';
+import {
+  getScenarios,
+  deleteScenario,
+  getLastRunLog,
+  saveScenario,
+  normalizeScenario,
+  getRunStatuses,
+  saveRunStatus,
+  deleteRunStatus,
+} from '../storage';
 
 interface Props {
   onNew: () => void;
   onEdit: (s: Scenario) => void;
-}
-
-type RunState = 'idle' | 'running' | 'success' | 'error';
-
-interface RunStatus {
-  state: RunState;
-  currentStep?: number;
-  log?: RunLog;
-  error?: string;
 }
 
 // ── SVG icons ──────────────────────────────────────────────────────────────
@@ -96,7 +96,10 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
   const [selectedLog, setSelectedLog] = useState<RunLog | null>(null);
 
   useEffect(() => {
-    getScenarios().then(setScenarios);
+    Promise.all([getScenarios(), getRunStatuses()]).then(([loadedScenarios, loadedStatuses]) => {
+      setScenarios(loadedScenarios);
+      setRunStatuses(loadedStatuses);
+    });
   }, []);
 
   useEffect(() => {
@@ -104,9 +107,11 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
       if (!message || typeof message !== 'object') return;
       const msg = message as RuntimeMessage;
       if (msg.type === 'RUN_PROGRESS') {
-        const { stepIndex, stepLog } = msg;
+        const { scenarioId, stepIndex, stepLog } = msg;
         setRunStatuses((prev) => {
-          const entry = Object.entries(prev).find(([, v]) => v.state === 'running');
+          const entry = scenarioId
+            ? [scenarioId, prev[scenarioId]] as const
+            : Object.entries(prev).find(([, v]) => v.state === 'running');
           if (!entry) return prev;
           const [id] = entry;
           return {
@@ -136,22 +141,27 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
 
   async function handleRun(scenario: Scenario) {
     setRunStatuses((prev) => ({ ...prev, [scenario.id]: { state: 'running', currentStep: 0 } }));
+    await saveRunStatus(scenario.id, { state: 'running', currentStep: 0 });
     const response = await chrome.runtime.sendMessage<RuntimeMessage, { ok: boolean; log?: RunLog; error?: string }>({
       type: 'RUN_SCENARIO',
       scenario,
     });
     if (response.ok && response.log) {
       const lastError = response.log.steps.findLast((step) => step.status === 'error')?.error;
+      const nextStatus: RunStatus = {
+        state: response.log.status === 'success' ? 'success' : 'error',
+        log: response.log,
+        ...(lastError ? { error: lastError } : {}),
+      };
       setRunStatuses((prev) => ({
         ...prev,
-        [scenario.id]: {
-          state: response.log?.status === 'success' ? 'success' : 'error',
-          log: response.log,
-          error: lastError,
-        },
+        [scenario.id]: nextStatus,
       }));
+      await saveRunStatus(scenario.id, nextStatus);
     } else {
-      setRunStatuses((prev) => ({ ...prev, [scenario.id]: { state: 'error', error: response.error } }));
+      const nextStatus: RunStatus = { state: 'error', error: response.error };
+      setRunStatuses((prev) => ({ ...prev, [scenario.id]: nextStatus }));
+      await saveRunStatus(scenario.id, nextStatus);
     }
   }
 
@@ -164,6 +174,10 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
     setRunStatuses((prev) => {
       const status = prev[scenarioId];
       if (!status?.log) return prev;
+      saveRunStatus(scenarioId, {
+        ...status,
+        log: { ...status.log, cleanupTabIds: [] },
+      }).catch(() => {});
       return {
         ...prev,
         [scenarioId]: {
@@ -179,6 +193,7 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
 
   async function handleDelete(id: string) {
     await deleteScenario(id);
+    await deleteRunStatus(id);
     setScenarios((prev) => prev.filter((s) => s.id !== id));
   }
 
@@ -211,6 +226,8 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
 
   // ── Render ────────────────────────────────────────────────────────────────
   const iconBtn = 'flex items-center justify-center w-7 h-7 rounded transition-colors cursor-pointer';
+  const actionBtn = 'inline-flex items-center justify-center gap-1.5 h-8 rounded-md px-3 text-xs font-semibold transition-all cursor-pointer';
+  const statusBtn = 'inline-flex items-center justify-center h-6 rounded px-2 text-[11px] font-medium transition-colors cursor-pointer';
   const getStepCount = (scenario: Scenario) => scenario.tabs.reduce((sum, tab) => sum + tab.steps.length, 0);
 
   return (
@@ -263,44 +280,39 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
           const isRunning = status.state === 'running';
           const stepCount = getStepCount(s);
           const cleanupTabIds = status.log?.cleanupTabIds ?? [];
-          const cleanupButton = cleanupTabIds.length > 0 ? (
-            <button
-              onClick={() => handleCleanup(s.id, cleanupTabIds)}
-              className="ml-1 shrink-0 text-gray-500 hover:text-gray-300 underline underline-offset-2 cursor-pointer"
-            >
-              cleanup
-            </button>
-          ) : null;
+          const hasCleanup = cleanupTabIds.length > 0;
 
           const statusBar = (
             status.state === 'running' ? (
-              <div className="flex items-center gap-1.5 text-xs text-blue-400 mt-1.5 pl-0.5">
+              <div className="flex items-center gap-1.5 text-xs text-blue-300 mt-2">
                 <IconSpinner />
                 <span>Step {(status.currentStep ?? 0) + 1} of {stepCount}</span>
               </div>
             ) : status.state === 'success' ? (
-              <div className="flex items-center gap-1.5 text-xs text-emerald-400 mt-1.5 pl-0.5">
-                <IconCheck />
-                <span>Completed</span>
+              <div className="flex items-center justify-between gap-2 text-xs mt-2">
+                <div className="flex items-center gap-1.5 text-emerald-300">
+                  <IconCheck />
+                  <span>Completed</span>
+                </div>
                 <button
                   onClick={() => handleShowLog(s)}
-                  className="ml-1 text-gray-500 hover:text-gray-300 underline underline-offset-2 cursor-pointer"
+                  className={`${statusBtn} text-gray-400 hover:bg-gray-800 hover:text-gray-100`}
                 >
-                  log
+                  Log
                 </button>
-                {cleanupButton}
               </div>
             ) : status.state === 'error' ? (
-              <div className="flex items-center gap-1.5 text-xs text-red-400 mt-1.5 pl-0.5">
-                <IconAlert />
-                <span className="truncate">{status.error}</span>
+              <div className="flex items-center justify-between gap-2 text-xs mt-2">
+                <div className="flex min-w-0 items-center gap-1.5 text-red-300">
+                  <span className="shrink-0"><IconAlert /></span>
+                  <span className="truncate">{status.error}</span>
+                </div>
                 <button
                   onClick={() => handleShowLog(s)}
-                  className="ml-1 shrink-0 text-gray-500 hover:text-gray-300 underline underline-offset-2 cursor-pointer"
+                  className={`${statusBtn} shrink-0 text-gray-400 hover:bg-gray-800 hover:text-gray-100`}
                 >
-                  log
+                  Log
                 </button>
-                {cleanupButton}
               </div>
             ) : null
           );
@@ -308,7 +320,9 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
           return (
             <div
               key={s.id}
-              className="bg-gray-900 border border-gray-800 rounded-lg px-3 py-2.5 transition-colors hover:border-gray-700"
+              className={`bg-gray-900 border rounded-lg px-3 py-3 transition-colors hover:border-gray-700 ${
+                isRunning ? 'border-blue-800/70' : hasCleanup ? 'border-cyan-700/60' : 'border-gray-800'
+              }`}
             >
               {/* Top row */}
               <div className="flex items-start gap-2">
@@ -325,18 +339,6 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
 
                 {/* Action buttons */}
                 <div className="flex items-center gap-0.5 shrink-0 mt-0.5">
-                  <button
-                    title="Run"
-                    onClick={() => handleRun(s)}
-                    disabled={isRunning}
-                    className={`${iconBtn} ${
-                      isRunning
-                        ? 'text-blue-400 cursor-not-allowed'
-                        : 'text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/60'
-                    }`}
-                  >
-                    {isRunning ? <IconSpinner /> : <IconPlay />}
-                  </button>
                   <button
                     title="Edit"
                     onClick={() => onEdit(s)}
@@ -356,6 +358,32 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
 
               {/* Status row */}
               {statusBar}
+
+              {/* Primary actions */}
+              <div className="mt-3 grid grid-cols-1 gap-2">
+                {hasCleanup ? (
+                  <button
+                    onClick={() => handleCleanup(s.id, cleanupTabIds)}
+                    className={`${actionBtn} bg-cyan-500 text-gray-950 shadow-sm shadow-cyan-950/40 hover:bg-cyan-400 hover:shadow-cyan-950/60 active:translate-y-px`}
+                  >
+                    Clean
+                  </button>
+                ) : (
+                  <button
+                    title="Run"
+                    onClick={() => handleRun(s)}
+                    disabled={isRunning}
+                    className={`${actionBtn} ${
+                      isRunning
+                        ? 'bg-blue-950/80 text-blue-200 ring-1 ring-blue-800/70 cursor-not-allowed'
+                        : 'bg-emerald-500 text-gray-950 shadow-sm shadow-emerald-950/40 hover:bg-emerald-400 hover:shadow-emerald-950/60 active:translate-y-px'
+                    }`}
+                  >
+                    {isRunning ? <IconSpinner /> : <IconPlay />}
+                    <span>{isRunning ? 'Running' : 'Start'}</span>
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}

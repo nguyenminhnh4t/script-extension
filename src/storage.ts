@@ -1,7 +1,8 @@
-import type { Scenario, ScenarioTab, RunLog, Step, StepLog, StepType } from './types';
+import type { Scenario, ScenarioTab, RunLog, RunStatus, Step, StepLog, StepType } from './types';
 
 const SCENARIOS_KEY = 'scenarios';
 const LOGS_KEY = 'runLogs';
+const RUN_STATUSES_KEY = 'runStatuses';
 const DRAFT_KEY = 'editorDraft';
 const PICK_TARGET_KEY = 'pickTarget';
 const STEP_TYPES: StepType[] = ['open_url', 'fill', 'click', 'select', 'wait', 'wait_for_element', 'press'];
@@ -134,6 +135,20 @@ function normalizeRunLog(value: unknown): RunLog | null {
   };
 }
 
+function normalizeRunStatus(value: unknown): RunStatus | null {
+  if (!isRecord(value)) return null;
+  const state = value.state === 'running' || value.state === 'success' || value.state === 'error'
+    ? value.state
+    : 'idle';
+  const log = normalizeRunLog(value.log);
+  return {
+    state,
+    ...(typeof value.currentStep === 'number' && Number.isInteger(value.currentStep) ? { currentStep: value.currentStep } : {}),
+    ...(log ? { log } : {}),
+    ...(typeof value.error === 'string' ? { error: value.error } : {}),
+  };
+}
+
 export interface PickTarget {
   tabIndex: number;
   stepIndex: number;
@@ -233,4 +248,33 @@ export async function saveRunLog(log: RunLog): Promise<void> {
 export async function getLastRunLog(scenarioId: string): Promise<RunLog | undefined> {
   const logs = await getRunLogs();
   return logs.find((l) => l.scenarioId === scenarioId);
+}
+
+export async function getRunStatuses(): Promise<Record<string, RunStatus>> {
+  const result = await chrome.storage.local.get(RUN_STATUSES_KEY);
+  const rawStatuses = result[RUN_STATUSES_KEY];
+  if (!isRecord(rawStatuses)) return {};
+
+  return Object.entries(rawStatuses).reduce<Record<string, RunStatus>>((acc, [scenarioId, value]) => {
+    const status = normalizeRunStatus(value);
+    if (status) acc[scenarioId] = status;
+    return acc;
+  }, {});
+}
+
+export async function saveRunStatus(scenarioId: string, status: RunStatus): Promise<void> {
+  if (!scenarioId) return;
+  const statuses = await getRunStatuses();
+  await chrome.storage.local.set({
+    [RUN_STATUSES_KEY]: {
+      ...statuses,
+      [scenarioId]: status,
+    },
+  });
+}
+
+export async function deleteRunStatus(scenarioId: string): Promise<void> {
+  const statuses = await getRunStatuses();
+  delete statuses[scenarioId];
+  await chrome.storage.local.set({ [RUN_STATUSES_KEY]: statuses });
 }
