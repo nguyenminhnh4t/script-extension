@@ -8,12 +8,36 @@ function setNativeValue(element: HTMLInputElement, value: string): void {
   element.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-function waitForElement(selector: string, timeout: number): Promise<Element> {
+const cancelledRuns = new Set<string>();
+
+function throwIfCancelled(runId: string): void {
+  if (cancelledRuns.has(runId)) throw new Error('Stopped');
+}
+
+function cancellableWait(duration: number, runId: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      if (cancelledRuns.has(runId)) {
+        clearInterval(interval);
+        reject(new Error('Stopped'));
+      } else if (Date.now() - startedAt >= duration) {
+        clearInterval(interval);
+        resolve();
+      }
+    }, Math.min(100, Math.max(20, duration)));
+  });
+}
+
+function waitForElement(selector: string, timeout: number, runId: string): Promise<Element> {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const interval = setInterval(() => {
       const el = document.querySelector(selector);
-      if (el) {
+      if (cancelledRuns.has(runId)) {
+        clearInterval(interval);
+        reject(new Error('Stopped'));
+      } else if (el) {
         clearInterval(interval);
         resolve(el);
       } else if (Date.now() - start >= timeout) {
@@ -24,7 +48,8 @@ function waitForElement(selector: string, timeout: number): Promise<Element> {
   });
 }
 
-async function executeStep(step: Step): Promise<void> {
+async function executeStep(step: Step, runId: string): Promise<void> {
+  throwIfCancelled(runId);
   switch (step.type) {
     case 'fill': {
       const el = document.querySelector<HTMLInputElement>(step.selector);
@@ -46,11 +71,11 @@ async function executeStep(step: Step): Promise<void> {
       break;
     }
     case 'wait': {
-      await new Promise((r) => setTimeout(r, step.duration));
+      await cancellableWait(step.duration, runId);
       break;
     }
     case 'wait_for_element': {
-      await waitForElement(step.selector, step.timeout);
+      await waitForElement(step.selector, step.timeout, runId);
       break;
     }
     case 'press': {
@@ -233,10 +258,16 @@ function startRecordKeyMode(): void {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'RUN_STEP') {
-    executeStep(message.step as Step)
+    const runId = typeof message.runId === 'string' ? message.runId : 'legacy';
+    executeStep(message.step as Step, runId)
       .then(() => sendResponse({ ok: true }))
       .catch((err: Error) => sendResponse({ ok: false, error: err.message }));
     return true;
+  }
+  if (message.type === 'CANCEL_RUN') {
+    cancelledRuns.add(message.runId);
+    sendResponse({ ok: true });
+    return false;
   }
   if (message.type === 'START_PICK_MODE') {
     startPickMode();

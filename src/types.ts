@@ -86,6 +86,7 @@ export interface Scenario {
 export type StepStatus = 'pending' | 'success' | 'error';
 
 export interface StepLog {
+  tabId?: number;
   tabIndex: number;
   tabName: string;
   stepIndex: number;
@@ -94,12 +95,24 @@ export interface StepLog {
   error?: string;
 }
 
+export interface RunTabLog {
+  tabId: number;
+  tabIndex?: number;
+  scenarioTabId?: string;
+  tabName: string;
+  url: string;
+  openedAt: string;
+  source: 'scenario' | 'spawned';
+  openerTabId?: number;
+}
+
 export interface RunLog {
   scenarioId: string;
   scenarioName: string;
   startedAt: string;
   endedAt: string;
   status: 'success' | 'error';
+  tabs: RunTabLog[];
   steps: StepLog[];
   cleanupTabIds: number[];
 }
@@ -115,7 +128,10 @@ export interface RunStatus {
 
 export type RuntimeMessage =
   | { type: 'RUN_SCENARIO'; scenario: Scenario }
-  | { type: 'RUN_STEP'; step: Step }
+  | { type: 'STOP_SCENARIO'; scenarioId: string }
+  | { type: 'GET_ACTIVE_RUNS' }
+  | { type: 'RUN_STEP'; step: Step; runId: string }
+  | { type: 'CANCEL_RUN'; runId: string }
   | { type: 'RUN_COMPLETE'; log: RunLog }
   | { type: 'RUN_PROGRESS'; scenarioId?: string; stepIndex: number; stepLog: StepLog }
   | { type: 'CLEANUP_TABS'; tabIds: number[] }

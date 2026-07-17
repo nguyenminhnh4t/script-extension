@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Scenario, RunLog, RunStatus, StepLog, RuntimeMessage } from '../types';
+import type { Scenario, RunLog, RunStatus, RunTabLog, StepLog, RuntimeMessage } from '../types';
 import {
   getScenarios,
   deleteScenario,
@@ -16,6 +16,20 @@ interface Props {
   onEdit: (s: Scenario) => void;
 }
 
+function getLastStepError(steps: StepLog[]): string | undefined {
+  return steps.reduce<string | undefined>(
+    (lastError, step) => step.status === 'error' ? step.error : lastError,
+    undefined
+  );
+}
+
+function getStepsForTab(log: RunLog, tab: RunTabLog): StepLog[] {
+  return log.steps.filter((step) => (
+    step.tabId === tab.tabId
+    || (step.tabId == null && tab.tabIndex != null && step.tabIndex === tab.tabIndex)
+  ));
+}
+
 // ── SVG icons ──────────────────────────────────────────────────────────────
 const IconPlay = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
@@ -26,6 +40,11 @@ const IconSpinner = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="animate-spin">
     <circle cx="12" cy="12" r="9" strokeOpacity="0.25" />
     <path d="M12 3a9 9 0 0 1 9 9" />
+  </svg>
+);
+const IconStop = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+    <rect x="6" y="6" width="12" height="12" rx="1.5" />
   </svg>
 );
 const IconPencil = () => (
@@ -96,10 +115,37 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
   const [selectedLog, setSelectedLog] = useState<RunLog | null>(null);
 
   useEffect(() => {
-    Promise.all([getScenarios(), getRunStatuses()]).then(([loadedScenarios, loadedStatuses]) => {
+    async function loadListState() {
+      const [loadedScenarios, loadedStatuses] = await Promise.all([getScenarios(), getRunStatuses()]);
+      const activeRunIds = await getActiveRunIds();
+      const reconciledStatuses = await reconcileRunStatuses(loadedStatuses, activeRunIds);
       setScenarios(loadedScenarios);
-      setRunStatuses(loadedStatuses);
-    });
+      setRunStatuses(reconciledStatuses);
+    }
+
+    loadListState();
+  }, []);
+
+  useEffect(() => {
+    const handleTabRemoved = (tabId: number) => {
+      setRunStatuses((prev) => {
+        let changed = false;
+        const next = Object.fromEntries(Object.entries(prev).map(([scenarioId, status]) => {
+          if (!status.log?.cleanupTabIds.includes(tabId)) return [scenarioId, status];
+          const cleanupTabIds = status.log.cleanupTabIds.filter((id) => id !== tabId);
+          const nextStatus: RunStatus = {
+            ...status,
+            log: { ...status.log, cleanupTabIds },
+          };
+          changed = true;
+          saveRunStatus(scenarioId, nextStatus).catch(() => {});
+          return [scenarioId, nextStatus];
+        }));
+        return changed ? next : prev;
+      });
+    };
+    chrome.tabs.onRemoved.addListener(handleTabRemoved);
+    return () => chrome.tabs.onRemoved.removeListener(handleTabRemoved);
   }, []);
 
   useEffect(() => {
@@ -134,6 +180,18 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
           };
         });
       }
+      if (msg.type === 'RUN_COMPLETE') {
+        const { log } = msg;
+        const lastError = getLastStepError(log.steps);
+        setRunStatuses((prev) => ({
+          ...prev,
+          [log.scenarioId]: {
+            state: log.status === 'success' ? 'success' : 'error',
+            log,
+            ...(lastError ? { error: lastError } : log.status === 'error' ? { error: 'Stopped' } : {}),
+          },
+        }));
+      }
     };
     chrome.runtime.onMessage.addListener(handler);
     return () => chrome.runtime.onMessage.removeListener(handler);
@@ -147,11 +205,11 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
       scenario,
     });
     if (response.ok && response.log) {
-      const lastError = response.log.steps.findLast((step) => step.status === 'error')?.error;
+      const lastError = getLastStepError(response.log.steps);
       const nextStatus: RunStatus = {
         state: response.log.status === 'success' ? 'success' : 'error',
         log: response.log,
-        ...(lastError ? { error: lastError } : {}),
+        ...(lastError ? { error: lastError } : response.log.status === 'error' ? { error: 'Stopped' } : {}),
       };
       setRunStatuses((prev) => ({
         ...prev,
@@ -162,6 +220,43 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
       const nextStatus: RunStatus = { state: 'error', error: response.error };
       setRunStatuses((prev) => ({ ...prev, [scenario.id]: nextStatus }));
       await saveRunStatus(scenario.id, nextStatus);
+    }
+  }
+
+  async function handleStop(scenarioId: string) {
+    setRunStatuses((prev) => {
+      const status = prev[scenarioId];
+      if (!status) return prev;
+      const nextStatus: RunStatus = {
+        ...status,
+        state: 'error',
+        error: 'Stopped',
+        ...(status.log ? {
+          log: {
+            ...status.log,
+            endedAt: new Date().toISOString(),
+            status: 'error',
+          },
+        } : {}),
+      };
+      saveRunStatus(scenarioId, nextStatus).catch(() => {});
+      return { ...prev, [scenarioId]: nextStatus };
+    });
+
+    try {
+      const response = await chrome.runtime.sendMessage<RuntimeMessage, { ok: boolean; error?: string }>({
+        type: 'STOP_SCENARIO',
+        scenarioId,
+      });
+      if (response.ok) return;
+    } catch {
+      // Reconcile below if the background worker restarted during the request.
+    }
+
+    {
+      const statuses = await getRunStatuses();
+      const activeRunIds = await getActiveRunIds();
+      setRunStatuses(await reconcileRunStatuses(statuses, activeRunIds));
     }
   }
 
@@ -222,6 +317,63 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
       : [];
     for (const s of imported) await saveScenario(s);
     setScenarios(await getScenarios());
+  }
+
+  async function getActiveRunIds(): Promise<Set<string>> {
+    try {
+      const response = await chrome.runtime.sendMessage<RuntimeMessage, { ok: boolean; scenarioIds?: string[] }>({
+        type: 'GET_ACTIVE_RUNS',
+      });
+      return new Set(response.ok ? response.scenarioIds ?? [] : []);
+    } catch {
+      return new Set();
+    }
+  }
+
+  async function getOpenTabIds(tabIds: number[]): Promise<number[]> {
+    const uniqueIds = Array.from(new Set(tabIds));
+    const checks = await Promise.all(uniqueIds.map(async (tabId) => {
+      try {
+        await chrome.tabs.get(tabId);
+        return tabId;
+      } catch {
+        return null;
+      }
+    }));
+    return checks.filter((tabId): tabId is number => tabId !== null);
+  }
+
+  async function reconcileRunStatuses(
+    statuses: Record<string, RunStatus>,
+    activeRunIds: Set<string>
+  ): Promise<Record<string, RunStatus>> {
+    const entries = await Promise.all(Object.entries(statuses).map(async ([scenarioId, status]) => {
+      let nextStatus = status;
+      let changed = false;
+
+      if (status.log?.cleanupTabIds.length) {
+        const openCleanupTabIds = await getOpenTabIds(status.log.cleanupTabIds);
+        if (openCleanupTabIds.length !== status.log.cleanupTabIds.length) {
+          nextStatus = {
+            ...nextStatus,
+            log: { ...status.log, cleanupTabIds: openCleanupTabIds },
+          };
+          changed = true;
+        }
+      }
+
+      if (nextStatus.state === 'running' && !activeRunIds.has(scenarioId)) {
+        nextStatus = nextStatus.log?.cleanupTabIds.length
+          ? { ...nextStatus, state: 'error', error: nextStatus.error ?? 'Stopped' }
+          : { state: 'idle' };
+        changed = true;
+      }
+
+      if (changed) await saveRunStatus(scenarioId, nextStatus);
+      return [scenarioId, nextStatus] as const;
+    }));
+
+    return Object.fromEntries(entries);
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -361,7 +513,16 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
 
               {/* Primary actions */}
               <div className="mt-3 grid grid-cols-1 gap-2">
-                {hasCleanup ? (
+                {isRunning ? (
+                  <button
+                    title="Stop"
+                    onClick={() => handleStop(s.id)}
+                    className={`${actionBtn} bg-rose-500 text-gray-950 shadow-sm shadow-rose-950/40 hover:bg-rose-400 hover:shadow-rose-950/60 active:translate-y-px`}
+                  >
+                    <IconStop />
+                    <span>Stop</span>
+                  </button>
+                ) : hasCleanup ? (
                   <button
                     onClick={() => handleCleanup(s.id, cleanupTabIds)}
                     className={`${actionBtn} bg-cyan-500 text-gray-950 shadow-sm shadow-cyan-950/40 hover:bg-cyan-400 hover:shadow-cyan-950/60 active:translate-y-px`}
@@ -372,15 +533,10 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
                   <button
                     title="Run"
                     onClick={() => handleRun(s)}
-                    disabled={isRunning}
-                    className={`${actionBtn} ${
-                      isRunning
-                        ? 'bg-blue-950/80 text-blue-200 ring-1 ring-blue-800/70 cursor-not-allowed'
-                        : 'bg-emerald-500 text-gray-950 shadow-sm shadow-emerald-950/40 hover:bg-emerald-400 hover:shadow-emerald-950/60 active:translate-y-px'
-                    }`}
+                    className={`${actionBtn} bg-emerald-500 text-gray-950 shadow-sm shadow-emerald-950/40 hover:bg-emerald-400 hover:shadow-emerald-950/60 active:translate-y-px`}
                   >
-                    {isRunning ? <IconSpinner /> : <IconPlay />}
-                    <span>{isRunning ? 'Running' : 'Start'}</span>
+                    <IconPlay />
+                    <span>Start</span>
                   </button>
                 )}
               </div>
@@ -410,16 +566,59 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1.5">
-            {selectedLog.steps.map((sl) => (
+            {selectedLog.tabs.length > 0 ? selectedLog.tabs.map((tab) => {
+              const tabSteps = getStepsForTab(selectedLog, tab);
+              return (
+                <div key={tab.tabId} className="rounded-lg border border-gray-800 bg-gray-900/70 overflow-hidden">
+                  <div className="px-3 py-2 border-b border-gray-800/80">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="min-w-0 truncate text-xs font-semibold text-gray-200">{tab.tabName}</p>
+                      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                        tab.source === 'spawned'
+                          ? 'bg-violet-950 text-violet-300'
+                          : 'bg-blue-950 text-blue-300'
+                      }`}>
+                        {tab.source === 'spawned' ? 'opened by tab' : 'scenario tab'}
+                      </span>
+                    </div>
+                    <p className="mt-1 truncate font-mono text-[10px] text-gray-500" title={tab.url || 'about:blank'}>
+                      Tab ID {tab.tabId} · {tab.url || 'about:blank'}
+                      {tab.openedAt ? ` · ${new Date(tab.openedAt).toLocaleTimeString()}` : ''}
+                    </p>
+                  </div>
+                  <div className="p-2 space-y-1">
+                    {tabSteps.length > 0 ? tabSteps.map((sl) => (
+                      <div
+                        key={`${sl.tabId ?? sl.tabIndex}-${sl.stepIndex}`}
+                        className={`flex items-start gap-2 text-xs rounded-md px-2.5 py-1.5 ${
+                          sl.status === 'success'
+                            ? 'bg-emerald-900/20 text-emerald-300'
+                            : 'bg-red-900/20 text-red-300'
+                        }`}
+                      >
+                        <span className="mt-px shrink-0">
+                          {sl.status === 'success' ? <IconCheck /> : <IconAlert />}
+                        </span>
+                        <span>
+                          <span className="font-mono text-gray-400">Step #{sl.stepIndex + 1}</span>
+                          <span className="ml-1.5 text-gray-300">{sl.type}</span>
+                          {sl.error && <span className="ml-2 text-red-300">{sl.error}</span>}
+                        </span>
+                      </div>
+                    )) : (
+                      <p className="px-2 py-1 text-[11px] text-gray-600">No automation steps ran in this tab.</p>
+                    )}
+                  </div>
+                </div>
+              );
+            }) : selectedLog.steps.map((sl) => (
               <div
-                key={`${sl.tabIndex}-${sl.stepIndex}`}
+                key={`${sl.tabId ?? sl.tabIndex}-${sl.stepIndex}`}
                 className={`flex items-start gap-2 text-xs rounded-md px-2.5 py-1.5 ${
                   sl.status === 'success' ? 'bg-emerald-900/20 text-emerald-300' : 'bg-red-900/20 text-red-300'
                 }`}
               >
-                <span className="mt-px shrink-0">
-                  {sl.status === 'success' ? <IconCheck /> : <IconAlert />}
-                </span>
+                <span className="mt-px shrink-0">{sl.status === 'success' ? <IconCheck /> : <IconAlert />}</span>
                 <span>
                   <span className="font-mono text-gray-400">{sl.tabName} #{sl.stepIndex + 1}</span>
                   <span className="ml-1.5 text-gray-300">{sl.type}</span>

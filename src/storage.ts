@@ -1,4 +1,4 @@
-import type { Scenario, ScenarioTab, RunLog, RunStatus, Step, StepLog, StepType } from './types';
+import type { Scenario, ScenarioTab, RunLog, RunStatus, RunTabLog, Step, StepLog, StepType } from './types';
 
 const SCENARIOS_KEY = 'scenarios';
 const LOGS_KEY = 'runLogs';
@@ -46,6 +46,8 @@ function normalizeStep(value: unknown): Step | null {
     case 'press':
       return { type: 'press', key: stringValue(value.key) };
   }
+
+  return null;
 }
 
 export function normalizeScenario(value: unknown): Scenario | null {
@@ -111,6 +113,7 @@ function normalizeStepLog(value: unknown): StepLog | null {
     ? value.status
     : 'error';
   return {
+    ...(typeof value.tabId === 'number' && Number.isInteger(value.tabId) ? { tabId: value.tabId } : {}),
     tabIndex: numberValue(value.tabIndex, 0),
     tabName: stringValue(value.tabName, 'Tab 1'),
     stepIndex: numberValue(value.stepIndex, 0),
@@ -120,9 +123,26 @@ function normalizeStepLog(value: unknown): StepLog | null {
   };
 }
 
+function normalizeRunTabLog(value: unknown): RunTabLog | null {
+  if (!isRecord(value) || typeof value.tabId !== 'number' || !Number.isInteger(value.tabId)) return null;
+  return {
+    tabId: value.tabId,
+    ...(typeof value.tabIndex === 'number' && Number.isInteger(value.tabIndex) ? { tabIndex: value.tabIndex } : {}),
+    ...(typeof value.scenarioTabId === 'string' ? { scenarioTabId: value.scenarioTabId } : {}),
+    tabName: stringValue(value.tabName, `Tab ${value.tabId}`),
+    url: stringValue(value.url),
+    openedAt: stringValue(value.openedAt),
+    source: value.source === 'spawned' ? 'spawned' : 'scenario',
+    ...(typeof value.openerTabId === 'number' && Number.isInteger(value.openerTabId)
+      ? { openerTabId: value.openerTabId }
+      : {}),
+  };
+}
+
 function normalizeRunLog(value: unknown): RunLog | null {
   if (!isRecord(value)) return null;
   const rawSteps = Array.isArray(value.steps) ? value.steps : [];
+  const rawTabs = Array.isArray(value.tabs) ? value.tabs : [];
   const rawCleanupTabIds = Array.isArray(value.cleanupTabIds) ? value.cleanupTabIds : [];
   return {
     scenarioId: stringValue(value.scenarioId),
@@ -130,6 +150,7 @@ function normalizeRunLog(value: unknown): RunLog | null {
     startedAt: stringValue(value.startedAt),
     endedAt: stringValue(value.endedAt),
     status: value.status === 'success' ? 'success' : 'error',
+    tabs: rawTabs.map(normalizeRunTabLog).filter((tab): tab is RunTabLog => tab !== null),
     steps: rawSteps.map(normalizeStepLog).filter((step): step is StepLog => step !== null),
     cleanupTabIds: rawCleanupTabIds.filter((id): id is number => typeof id === 'number' && Number.isInteger(id)),
   };
