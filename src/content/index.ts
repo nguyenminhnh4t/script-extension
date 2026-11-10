@@ -283,8 +283,20 @@ function startRecording(): void {
     'background:#450a0a', 'color:#fca5a5', 'font:12px/1 monospace',
     'padding:6px 10px', 'border-radius:6px', 'border:1px solid #b91c1c',
     'pointer-events:none', 'opacity:.9',
+    'display:flex', 'align-items:center', 'gap:6px',
   ].join(';');
-  banner.textContent = '● Recording';
+  const svgNs = 'http://www.w3.org/2000/svg';
+  const dot = document.createElementNS(svgNs, 'svg');
+  dot.setAttribute('width', '10');
+  dot.setAttribute('height', '10');
+  dot.setAttribute('viewBox', '0 0 10 10');
+  const circle = document.createElementNS(svgNs, 'circle');
+  circle.setAttribute('cx', '5');
+  circle.setAttribute('cy', '5');
+  circle.setAttribute('r', '4');
+  circle.setAttribute('fill', '#ef4444');
+  dot.appendChild(circle);
+  banner.append(dot, 'Recording');
 
   let pendingFill: { el: TextField; startedAt: number; endedAt: number } | null = null;
   let lastEnterAt = 0;

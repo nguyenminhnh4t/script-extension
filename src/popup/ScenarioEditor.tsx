@@ -121,15 +121,72 @@ const IconKeyboard = () => (
   </svg>
 );
 
-// Step type icon labels
-const STEP_ICONS: Record<StepType, string> = {
-  open_url: '🔗',
-  fill: '✏️',
-  click: '👆',
-  select: '☰',
-  wait: '⏱',
-  wait_for_element: '⏳',
-  press: '⌨',
+// Step type icons (stroke icons, 14px, inherit currentColor)
+function StepSvg({ children }: { children: React.ReactNode }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {children}
+    </svg>
+  );
+}
+
+const STEP_ICONS: Record<StepType, React.ReactNode> = {
+  // Link
+  open_url: (
+    <StepSvg>
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </StepSvg>
+  ),
+  // Text cursor in a field
+  fill: (
+    <StepSvg>
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <line x1="7" y1="9.5" x2="7" y2="14.5" />
+      <line x1="11" y1="12" x2="17" y2="12" />
+    </StepSvg>
+  ),
+  // Mouse pointer
+  click: (
+    <StepSvg>
+      <path d="M4 4l7.07 17 2.51-7.39L21 11.07z" />
+      <path d="M13.6 13.6l5.4 5.4" />
+    </StepSvg>
+  ),
+  // Dropdown list
+  select: (
+    <StepSvg>
+      <rect x="3" y="4" width="18" height="6" rx="1.5" />
+      <polyline points="15 6.5 16.5 8 18 6.5" />
+      <line x1="4" y1="14" x2="16" y2="14" />
+      <line x1="4" y1="18" x2="12" y2="18" />
+    </StepSvg>
+  ),
+  // Stopwatch
+  wait: (
+    <StepSvg>
+      <circle cx="12" cy="13" r="8" />
+      <polyline points="12 9 12 13 14.5 15.5" />
+      <line x1="10" y1="2" x2="14" y2="2" />
+    </StepSvg>
+  ),
+  // Hourglass
+  wait_for_element: (
+    <StepSvg>
+      <path d="M6 2h12" />
+      <path d="M6 22h12" />
+      <path d="M7 2v4a5 5 0 0 0 5 5 5 5 0 0 0 5-5V2" />
+      <path d="M7 22v-4a5 5 0 0 1 5-5 5 5 0 0 1 5 5v4" />
+    </StepSvg>
+  ),
+  // Keyboard key
+  press: (
+    <StepSvg>
+      <rect x="3" y="5" width="18" height="14" rx="2.5" />
+      <path d="M8 15h8" />
+      <path d="M8 10h.01M12 10h.01M16 10h.01" />
+    </StepSvg>
+  ),
 };
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -145,6 +202,8 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
   const [isTabMenuOpen, setIsTabMenuOpen] = useState(false);
   const [isWindowTargetMenuOpen, setIsWindowTargetMenuOpen] = useState(false);
   const [openStepTypeMenu, setOpenStepTypeMenu] = useState<number | null>(null);
+  /** Step type menus open upward so they don't grow the scroll height; fall back to downward when there's no room above. */
+  const [stepTypeMenuUp, setStepTypeMenuUp] = useState(true);
   const [showWarning, setShowWarning] = useState(true);
   /** Index of the scenario tab receiving recorded steps, or null when not recording. */
   const [recordingTabIndex, setRecordingTabIndex] = useState<number | null>(null);
@@ -862,11 +921,20 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
                 >
                   <IconGrip />
                 </button>
-                <span className="text-xs w-4 text-center shrink-0">{STEP_ICONS[step.type]}</span>
+                <span className="flex w-4 shrink-0 items-center justify-center text-gray-400">{STEP_ICONS[step.type]}</span>
                 <div className="relative flex-1 min-w-0">
                   <button
                     type="button"
-                    onClick={() => setOpenStepTypeMenu((openIndex) => openIndex === i ? null : i)}
+                    onClick={(e) => {
+                      if (openStepTypeMenu === i) { setOpenStepTypeMenu(null); return; }
+                      const container = scrollContainerRef.current;
+                      const spaceAbove = container
+                        ? e.currentTarget.getBoundingClientRect().top - container.getBoundingClientRect().top
+                        : Infinity;
+                      // 7 options × 32px + borders/gap
+                      setStepTypeMenuUp(spaceAbove >= STEP_TYPES.length * 32 + 8);
+                      setOpenStepTypeMenu(i);
+                    }}
                     className="flex h-8 w-full items-center justify-between gap-2 rounded border border-transparent bg-gray-950/30 px-2 text-left text-xs text-gray-300 transition-colors hover:border-gray-700 hover:bg-gray-800/70 cursor-pointer"
                   >
                     <span className="truncate">{step.type}</span>
@@ -875,7 +943,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
                     </span>
                   </button>
                   {openStepTypeMenu === i && (
-                    <div className="absolute left-0 right-0 top-9 z-50 overflow-hidden rounded-md border border-gray-700 bg-gray-900 shadow-xl shadow-gray-950/60">
+                    <div className={`absolute left-0 right-0 ${stepTypeMenuUp ? 'bottom-9' : 'top-9'} z-50 overflow-hidden rounded-md border border-gray-700 bg-gray-900 shadow-xl shadow-gray-950/60`}>
                       {STEP_TYPES.map((t) => (
                         <button
                           key={t}
@@ -890,7 +958,7 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
                               : 'text-gray-300 hover:bg-gray-800'
                           }`}
                         >
-                          <span className="w-4 text-center">{STEP_ICONS[t]}</span>
+                          <span className="flex w-4 shrink-0 items-center justify-center">{STEP_ICONS[t]}</span>
                           <span>{t}</span>
                         </button>
                       ))}
