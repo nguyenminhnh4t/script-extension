@@ -1,7 +1,8 @@
 import type { Step } from '../types';
 
-function setNativeValue(element: HTMLInputElement, value: string): void {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+function setNativeValue(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+  const proto = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
   if (!setter) throw new Error('Cannot find native input setter');
   setter.call(element, value);
   element.dispatchEvent(new Event('input', { bubbles: true }));
@@ -52,8 +53,10 @@ async function executeStep(step: Step, runId: string): Promise<void> {
   throwIfCancelled(runId);
   switch (step.type) {
     case 'fill': {
-      const el = document.querySelector<HTMLInputElement>(step.selector);
+      const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(step.selector);
       if (!el) throw new Error(`Element not found: ${step.selector}`);
+      // Focus first so a following `press` step (e.g. Enter) targets this field.
+      el.focus();
       setNativeValue(el, step.value);
       break;
     }
@@ -256,7 +259,160 @@ function startRecordKeyMode(): void {
   document.body.appendChild(banner);
 }
 
+// --- Action recorder ---
+
+const NON_TEXT_INPUT_TYPES = new Set(['checkbox', 'radio', 'submit', 'button', 'reset', 'file', 'image', 'hidden']);
+const RECORDED_KEYS = new Set(['Enter', 'Escape', 'Tab']);
+const CLICKABLE_SELECTOR = 'button, a, [role="button"], [role="link"], [role="menuitem"], [role="tab"], [role="option"], label, summary';
+
+type TextField = HTMLInputElement | HTMLTextAreaElement;
+
+function isTextField(el: EventTarget | null): el is TextField {
+  if (el instanceof HTMLTextAreaElement) return true;
+  return el instanceof HTMLInputElement && !NON_TEXT_INPUT_TYPES.has(el.type);
+}
+
+let recorderCleanup: (() => void) | null = null;
+
+function startRecording(): void {
+  if (recorderCleanup) return;
+
+  const banner = document.createElement('div');
+  banner.style.cssText = [
+    'position:fixed', 'bottom:12px', 'right:12px', 'z-index:2147483647',
+    'background:#450a0a', 'color:#fca5a5', 'font:12px/1 monospace',
+    'padding:6px 10px', 'border-radius:6px', 'border:1px solid #b91c1c',
+    'pointer-events:none', 'opacity:.9',
+  ].join(';');
+  banner.textContent = '● Recording';
+
+  let pendingFill: { el: TextField; startedAt: number; endedAt: number } | null = null;
+  let lastEnterAt = 0;
+  let labelForward: { control: HTMLElement; at: number } | null = null;
+
+  function send(step: Step, startedAt: number, endedAt = startedAt): void {
+    chrome.runtime.sendMessage({ type: 'RECORDED_ACTION', step, startedAt, endedAt }).catch(() => {});
+  }
+
+  function flushFill(): void {
+    if (!pendingFill) return;
+    const { el, startedAt, endedAt } = pendingFill;
+    pendingFill = null;
+    send({ type: 'fill', selector: buildSelector(el), value: el.value }, startedAt, endedAt);
+  }
+
+  function onInput(e: Event): void {
+    if (!e.isTrusted || !isTextField(e.target)) return;
+    const now = Date.now();
+    if (pendingFill && pendingFill.el !== e.target) flushFill();
+    if (pendingFill) pendingFill.endedAt = now;
+    else pendingFill = { el: e.target, startedAt: now, endedAt: now };
+  }
+
+  function onChange(e: Event): void {
+    if (!e.isTrusted) return;
+    const target = e.target;
+    if (target instanceof HTMLSelectElement) {
+      flushFill();
+      send({ type: 'select', selector: buildSelector(target), value: target.value }, Date.now());
+    } else if (pendingFill && pendingFill.el === target) {
+      flushFill();
+    }
+  }
+
+  function onClick(e: MouseEvent): void {
+    if (!e.isTrusted || !(e.target instanceof Element)) return;
+    // Synthetic click fired by Enter-to-submit — the Enter press is already recorded.
+    if (e.detail === 0 && Date.now() - lastEnterAt < 500) return;
+    let el: Element | null = e.target.closest(CLICKABLE_SELECTOR) ?? e.target;
+    while (el && !(el instanceof HTMLElement)) el = el.parentElement;
+    if (!el) return;
+    // Focusing a field or opening a dropdown is covered by fill/select steps.
+    if (isTextField(el) || el instanceof HTMLSelectElement || el instanceof HTMLOptionElement) return;
+    // A label click is forwarded by the browser as a second click on its control — skip that one.
+    if (labelForward && labelForward.control === el && Date.now() - labelForward.at < 200) {
+      labelForward = null;
+      return;
+    }
+    const control = el instanceof HTMLLabelElement ? el.control : null;
+    labelForward = control instanceof HTMLElement ? { control, at: Date.now() } : null;
+    flushFill();
+    send({ type: 'click', selector: buildSelector(el) }, Date.now());
+  }
+
+  function onKeyDown(e: KeyboardEvent): void {
+    if (!e.isTrusted || !RECORDED_KEYS.has(e.key)) return;
+    // Enter on a button/link triggers a click, which is recorded instead.
+    if (e.key === 'Enter' && !isTextField(e.target)) return;
+    if (e.key === 'Enter' && e.target instanceof HTMLTextAreaElement) return;
+    flushFill();
+    if (e.key === 'Enter') lastEnterAt = Date.now();
+    send({ type: 'press', key: e.key }, Date.now());
+  }
+
+  function onPageHide(): void {
+    flushFill();
+  }
+
+  function cleanup(): void {
+    flushFill();
+    document.removeEventListener('input', onInput, true);
+    document.removeEventListener('change', onChange, true);
+    document.removeEventListener('click', onClick, true);
+    document.removeEventListener('keydown', onKeyDown, true);
+    window.removeEventListener('pagehide', onPageHide);
+    banner.remove();
+    recorderCleanup = null;
+  }
+
+  recorderCleanup = cleanup;
+  document.addEventListener('input', onInput, true);
+  document.addEventListener('change', onChange, true);
+  document.addEventListener('click', onClick, true);
+  document.addEventListener('keydown', onKeyDown, true);
+  window.addEventListener('pagehide', onPageHide);
+  document.documentElement.appendChild(banner);
+}
+
+function stopRecording(): void {
+  recorderCleanup?.();
+}
+
+// content.js is injected repeatedly via executeScript; only the first live copy
+// per page registers listeners, otherwise every message would be handled N times.
+type GuardedWindow = Window & { __simpleAutomationAlive?: () => boolean };
+const guardedWindow = window as GuardedWindow;
+const alreadyLoaded = (() => {
+  try {
+    return guardedWindow.__simpleAutomationAlive?.() === true;
+  } catch {
+    return false;
+  }
+})();
+
+if (!alreadyLoaded) {
+  guardedWindow.__simpleAutomationAlive = () => {
+    try {
+      return Boolean(chrome.runtime?.id);
+    } catch {
+      return false;
+    }
+  };
+  registerMessageListener();
+}
+
+function registerMessageListener(): void {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'START_RECORDING') {
+    startRecording();
+    sendResponse({ ok: true });
+    return false;
+  }
+  if (message.type === 'STOP_RECORDING') {
+    stopRecording();
+    sendResponse({ ok: true });
+    return false;
+  }
   if (message.type === 'RUN_STEP') {
     const runId = typeof message.runId === 'string' ? message.runId : 'legacy';
     executeStep(message.step as Step, runId)
@@ -280,3 +436,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 });
+}

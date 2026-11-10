@@ -99,6 +99,17 @@ const IconWarning = () => (
     <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
   </svg>
 );
+const IconRecord = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <circle cx="12" cy="12" r="9" />
+    <circle cx="12" cy="12" r="4" fill="currentColor" stroke="none" />
+  </svg>
+);
+const IconStop = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+    <rect x="6" y="6" width="12" height="12" rx="1.5" />
+  </svg>
+);
 const IconKeyboard = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <rect x="2" y="6" width="20" height="12" rx="2" />
@@ -135,6 +146,48 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
   const [isWindowTargetMenuOpen, setIsWindowTargetMenuOpen] = useState(false);
   const [openStepTypeMenu, setOpenStepTypeMenu] = useState<number | null>(null);
   const [showWarning, setShowWarning] = useState(true);
+  /** Index of the scenario tab receiving recorded steps, or null when not recording. */
+  const [recordingTabIndex, setRecordingTabIndex] = useState<number | null>(null);
+  const recordingTabIndexRef = useRef<number | null>(null);
+  const [recordedCount, setRecordedCount] = useState(0);
+
+  useEffect(() => {
+    recordingTabIndexRef.current = recordingTabIndex;
+  }, [recordingTabIndex]);
+
+  useEffect(() => {
+    const handler = (message: unknown) => {
+      if (!message || typeof message !== 'object') return;
+      const msg = message as { type?: string; steps?: Step[]; reason?: string };
+      if (msg.type === 'RECORDED_STEPS' && Array.isArray(msg.steps)) {
+        const tabIndex = recordingTabIndexRef.current;
+        if (tabIndex == null) return;
+        const recorded = msg.steps;
+        setScenario((prev) => ({
+          ...prev,
+          tabs: prev.tabs.map((tab, i) => (
+            i === tabIndex ? { ...tab, steps: [...tab.steps, ...recorded] } : tab
+          )),
+        }));
+        setRecordedCount((count) => count + recorded.filter((step) => step.type !== 'wait').length);
+        requestAnimationFrame(() => {
+          scrollContainerRef.current?.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: 'smooth' });
+        });
+      }
+      if (msg.type === 'RECORDING_STOPPED') {
+        setRecordingTabIndex(null);
+        if (msg.reason) setError(msg.reason);
+      }
+    };
+    chrome.runtime.onMessage.addListener(handler);
+    return () => {
+      chrome.runtime.onMessage.removeListener(handler);
+      // Leaving the editor must not leave the page recording.
+      if (recordingTabIndexRef.current != null) {
+        chrome.runtime.sendMessage({ type: 'STOP_RECORDING' }).catch(() => {});
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!pickedSelector) return;
@@ -219,6 +272,8 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
     const tab = scenario.tabs[tabIndex];
     if (scenario.tabs.length <= 1) return;
     if (!confirm(`Delete ${tab?.name || `URL ${tabIndex + 1}`}?`)) return;
+    if (recordingTabIndex === tabIndex) stopRecording();
+    else if (recordingTabIndex != null && recordingTabIndex > tabIndex) setRecordingTabIndex(recordingTabIndex - 1);
     setScenario((prev) => {
       if (prev.tabs.length <= 1) return prev;
       const removedTabId = prev.tabs[tabIndex]?.id;
@@ -330,14 +385,46 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
     setDragOverStep(null);
   }
 
+  async function startRecording(tabIndex: number) {
+    setError('');
+    setRecordedCount(0);
+    setOpenStepTypeMenu(null);
+    try {
+      const response = await chrome.runtime.sendMessage({ type: 'START_RECORDING' }) as { ok?: boolean; url?: string; error?: string } | undefined;
+      if (!response?.ok) {
+        setError(response?.error ? `Cannot record: ${response.error}` : 'Cannot record on this page');
+        return;
+      }
+      setRecordingTabIndex(tabIndex);
+      const url = response.url ?? '';
+      if (/^https?:/i.test(url)) {
+        setScenario((prev) => ({
+          ...prev,
+          tabs: prev.tabs.map((tab, i) => (
+            i === tabIndex && !tab.startUrl.trim() && tab.steps.length === 0 ? { ...tab, startUrl: url } : tab
+          )),
+        }));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Cannot start recording');
+    }
+  }
+
+  function stopRecording() {
+    setRecordingTabIndex(null);
+    chrome.runtime.sendMessage({ type: 'STOP_RECORDING' }).catch(() => {});
+  }
+
   async function handleSave() {
     if (!scenario.name.trim()) { setError('Scenario name is required'); return; }
+    if (recordingTabIndex != null) stopRecording();
     await saveScenario(scenario);
     await clearDraft();
     onSave();
   }
 
   async function handleCancel() {
+    if (recordingTabIndex != null) stopRecording();
     await clearDraft();
     onCancel();
   }
@@ -829,13 +916,43 @@ export default function ScenarioEditor({ initial, pickedSelector, onPickedSelect
           );
           })}
 
-          <button
-            onClick={() => addStep(activeTabIndex)}
-          className="w-full flex items-center justify-center gap-1.5 text-xs border border-dashed border-gray-700/80 hover:border-gray-500 text-gray-600 hover:text-gray-300 py-2 rounded-md transition-colors cursor-pointer"
-          >
-            <IconPlus />
-            Add step
-          </button>
+          {recordingTabIndex != null && (
+            <div className="flex items-center gap-2 rounded-md border border-red-800/60 bg-red-950/30 px-2.5 py-2 text-xs text-red-300">
+              <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" />
+              <span className="min-w-0 flex-1">
+                Recording into {scenario.tabs[recordingTabIndex]?.name || `URL ${recordingTabIndex + 1}`} · {recordedCount} action{recordedCount !== 1 ? 's' : ''}
+                <span className="block text-[10px] text-red-400/70">Waits between actions are recorded too.</span>
+              </span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              onClick={() => addStep(activeTabIndex)}
+              className="w-full flex items-center justify-center gap-1.5 text-xs border border-dashed border-gray-700/80 hover:border-gray-500 text-gray-600 hover:text-gray-300 py-2 rounded-md transition-colors cursor-pointer"
+            >
+              <IconPlus />
+              Add step
+            </button>
+            {recordingTabIndex != null ? (
+              <button
+                onClick={stopRecording}
+                className="w-full flex items-center justify-center gap-1.5 text-xs border border-red-700/70 bg-red-950/40 hover:bg-red-950/70 text-red-300 py-2 rounded-md transition-colors cursor-pointer"
+              >
+                <IconStop />
+                Stop recording
+              </button>
+            ) : (
+              <button
+                onClick={() => startRecording(activeTabIndex)}
+                title="Record clicks, typing, selects and key presses on the current page, including the time between them"
+                className="w-full flex items-center justify-center gap-1.5 text-xs border border-dashed border-gray-700/80 hover:border-red-700/70 text-gray-600 hover:text-red-300 py-2 rounded-md transition-colors cursor-pointer"
+              >
+                <IconRecord />
+                Record
+              </button>
+            )}
+          </div>
         </div>
         )}
       </div>

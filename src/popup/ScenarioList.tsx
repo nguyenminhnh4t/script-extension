@@ -30,6 +30,26 @@ function getStepsForTab(log: RunLog, tab: RunTabLog): StepLog[] {
   ));
 }
 
+/** Lowercase and strip diacritics so "dang nhap" matches "Đăng nhập". */
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim();
+}
+
+function scenarioMatches(scenario: Scenario, terms: string[]): boolean {
+  if (terms.length === 0) return true;
+  const haystack = normalizeSearchText([
+    scenario.name,
+    ...scenario.tabs.flatMap((tab) => [tab.name, tab.startUrl]),
+  ].join(' '));
+  return terms.every((term) => haystack.includes(term));
+}
+
 // ── SVG icons ──────────────────────────────────────────────────────────────
 const IconPlay = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
@@ -95,6 +115,12 @@ const IconClose = () => (
     <line x1="6" y1="6" x2="18" y2="18" />
   </svg>
 );
+const IconSearch = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="7" />
+    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+  </svg>
+);
 const IconCheck = () => (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="20 6 9 17 4 12" />
@@ -113,6 +139,7 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [runStatuses, setRunStatuses] = useState<Record<string, RunStatus>>({});
   const [selectedLog, setSelectedLog] = useState<RunLog | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     async function loadListState() {
@@ -381,6 +408,8 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
   const actionBtn = 'inline-flex items-center justify-center gap-1.5 h-8 rounded-md px-3 text-xs font-semibold transition-all cursor-pointer';
   const statusBtn = 'inline-flex items-center justify-center h-6 rounded px-2 text-[11px] font-medium transition-colors cursor-pointer';
   const getStepCount = (scenario: Scenario) => scenario.tabs.reduce((sum, tab) => sum + tab.steps.length, 0);
+  const searchTerms = normalizeSearchText(searchQuery).split(/\s+/).filter(Boolean);
+  const visibleScenarios = scenarios.filter((scenario) => scenarioMatches(scenario, searchTerms));
 
   return (
     <div className="w-full min-h-screen bg-gray-950 text-gray-100 flex flex-col">
@@ -414,8 +443,46 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
         </div>
       </div>
 
+      {/* Search */}
+      {scenarios.length > 0 && (
+        <div className="px-3 pt-3">
+          <div className="relative">
+            <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500">
+              <IconSearch />
+            </span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') setSearchQuery(''); }}
+              placeholder="Search by name or URL"
+              className="h-8 w-full rounded-md border border-gray-800 bg-gray-900 pl-8 pr-8 text-xs text-gray-100 placeholder:text-gray-600 transition-colors focus:outline-none focus:border-blue-500/80"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                title="Clear search"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-1 top-1/2 -translate-y-1/2 flex h-6 w-6 items-center justify-center rounded text-gray-500 hover:bg-gray-800 hover:text-gray-200 cursor-pointer"
+              >
+                <IconClose />
+              </button>
+            )}
+          </div>
+          {searchTerms.length > 0 && (
+            <p className="mt-1.5 px-0.5 text-[10px] text-gray-500">
+              {visibleScenarios.length} of {scenarios.length} scenario{scenarios.length !== 1 ? 's' : ''}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Cards */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
+        {scenarios.length > 0 && visibleScenarios.length === 0 && (
+          <p className="mt-10 text-center text-xs text-gray-600">No scenarios match "{searchQuery.trim()}"</p>
+        )}
+
         {scenarios.length === 0 && (
           <div className="flex flex-col items-center justify-center gap-2 mt-16 text-gray-600">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -427,7 +494,7 @@ export default function ScenarioList({ onNew, onEdit }: Props) {
           </div>
         )}
 
-        {scenarios.map((s) => {
+        {visibleScenarios.map((s) => {
           const status = runStatuses[s.id] ?? { state: 'idle' };
           const isRunning = status.state === 'running';
           const stepCount = getStepCount(s);

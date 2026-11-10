@@ -1,4 +1,4 @@
-import type { RunTabLog, RuntimeMessage, StepLog } from '../types';
+import type { RunTabLog, RuntimeMessage, Step, StepLog } from '../types';
 import { runScenario } from './runner';
 import { getPickTarget, getRunStatuses, savePickTarget, saveRunLog, saveRunStatus } from '../storage';
 
@@ -62,7 +62,118 @@ chrome.action.onClicked.addListener((tab) => {
   }
 });
 
-chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
+// --- Recording session ---
+// State lives in session storage so it survives service-worker restarts.
+
+const RECORDING_KEY = 'recordingSession';
+/** Gaps shorter than this between two actions are not turned into wait steps. */
+const MIN_RECORDED_WAIT_MS = 300;
+
+interface RecordingSession {
+  tabId: number;
+  /** Time the previous recorded action finished, or null before the first action. */
+  lastActionEndedAt: number | null;
+}
+
+async function getRecordingSession(): Promise<RecordingSession | undefined> {
+  const stored = await chrome.storage.session.get(RECORDING_KEY);
+  const value = stored[RECORDING_KEY] as Partial<RecordingSession> | undefined;
+  if (!value || typeof value.tabId !== 'number') return undefined;
+  return {
+    tabId: value.tabId,
+    lastActionEndedAt: typeof value.lastActionEndedAt === 'number' ? value.lastActionEndedAt : null,
+  };
+}
+
+async function setRecordingSession(session: RecordingSession | undefined): Promise<void> {
+  if (session) await chrome.storage.session.set({ [RECORDING_KEY]: session });
+  else await chrome.storage.session.remove(RECORDING_KEY);
+}
+
+async function injectRecorder(tabId: number): Promise<void> {
+  await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+  await chrome.tabs.sendMessage(tabId, { type: 'START_RECORDING' });
+}
+
+async function stopRecording(reason?: string): Promise<void> {
+  const session = await getRecordingSession();
+  await setRecordingSession(undefined);
+  if (session) {
+    chrome.tabs.sendMessage(session.tabId, { type: 'STOP_RECORDING' }).catch(() => {});
+  }
+  chrome.runtime.sendMessage<RuntimeMessage>({ type: 'RECORDING_STOPPED', reason }).catch(() => {});
+}
+
+// Serialize recorded actions so wait gaps are computed in order.
+let recordingQueue = Promise.resolve();
+
+function handleRecordedAction(tabId: number | undefined, step: Step, startedAt: number, endedAt: number): void {
+  recordingQueue = recordingQueue.then(async () => {
+    const session = await getRecordingSession();
+    if (!session || session.tabId !== tabId) return;
+    const steps: Step[] = [];
+    if (session.lastActionEndedAt != null) {
+      const gap = startedAt - session.lastActionEndedAt;
+      if (gap >= MIN_RECORDED_WAIT_MS) {
+        steps.push({ type: 'wait', duration: Math.round(gap / 100) * 100 });
+      }
+    }
+    steps.push(step);
+    await setRecordingSession({
+      ...session,
+      lastActionEndedAt: Math.max(endedAt, session.lastActionEndedAt ?? 0),
+    });
+    chrome.runtime.sendMessage<RuntimeMessage>({ type: 'RECORDED_STEPS', steps }).catch(() => {});
+  }).catch(() => {});
+}
+
+// Content script is lost on navigation — re-inject the recorder once the new page loads.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status !== 'complete') return;
+  getRecordingSession().then((session) => {
+    if (session?.tabId === tabId) injectRecorder(tabId).catch(() => {});
+  }).catch(() => {});
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  getRecordingSession().then((session) => {
+    if (session?.tabId === tabId) void stopRecording('Recorded tab was closed');
+  }).catch(() => {});
+});
+
+chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
+  if (message.type === 'START_RECORDING') {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const tab = tabs[0];
+      if (!tab?.id) { sendResponse({ ok: false, error: 'No active tab' }); return; }
+      try {
+        const previous = await getRecordingSession();
+        if (previous && previous.tabId !== tab.id) {
+          chrome.tabs.sendMessage(previous.tabId, { type: 'STOP_RECORDING' }).catch(() => {});
+        }
+        await setRecordingSession({ tabId: tab.id, lastActionEndedAt: null });
+        await injectRecorder(tab.id);
+        sendResponse({ ok: true, url: tab.url ?? '' });
+      } catch (err) {
+        await setRecordingSession(undefined);
+        sendResponse({ ok: false, error: err instanceof Error ? err.message : 'Cannot record this page' });
+      }
+    });
+    return true;
+  }
+
+  if (message.type === 'STOP_RECORDING') {
+    stopRecording()
+      .then(() => sendResponse({ ok: true }))
+      .catch((err: Error) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (message.type === 'RECORDED_ACTION') {
+    handleRecordedAction(sender.tab?.id, message.step, message.startedAt, message.endedAt);
+    return false;
+  }
+
   if (message.type === 'RUN_SCENARIO') {
     const scenario = message.scenario;
     activeRuns.get(scenario.id)?.stop();

@@ -140,4 +140,9 @@ export type RuntimeMessage =
   | { type: 'PICK_CANCELLED' }
   | { type: 'START_RECORD_KEY' }
   | { type: 'RECORD_KEY_COMPLETE'; key: string }
-  | { type: 'RECORD_KEY_CANCELLED' };
+  | { type: 'RECORD_KEY_CANCELLED' }
+  | { type: 'START_RECORDING' }
+  | { type: 'STOP_RECORDING' }
+  | { type: 'RECORDED_ACTION'; step: Step; startedAt: number; endedAt: number }
+  | { type: 'RECORDED_STEPS'; steps: Step[] }
+  | { type: 'RECORDING_STOPPED'; reason?: string };
